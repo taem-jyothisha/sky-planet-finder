@@ -1,7 +1,12 @@
 /**
  * Vedic sky helpers + ISS look angles.
- * Sidereal longitudes: Lahiri ayanamsa (approx).
+ *
+ * AYANĀṂŚA POLICY (hard rule):
+ *   Raman (B.V. Raman / Swiss Ephemeris SIDM_RAMAN) ONLY.
+ *   Lahiri, KP, Fagan-Bradley, and every other ayanāṃśa are BANNED.
+ *
  * Sky pointing uses tropical ecliptic → equator → horizon (real sky).
+ * Sidereal labels (rāśi / nakṣatra) use Raman only.
  */
 (function (global) {
   "use strict";
@@ -47,24 +52,37 @@
     return a;
   }
 
-  /** Lahiri ayanamsa (degrees), good to ~0.01° for sky labels */
-  function lahiriAyanamsa(time) {
-    // time.tt = TT days since J2000.0 noon
-    const T = time.tt / 36525.0;
-    // IAU-ish Lahiri linear + small quadratic (deg)
-    return (
-      23.85304166 +
-      1.39697127 * T -
-      0.00001256 * T * T
-    );
+  /**
+   * Raman ayanāṃśa in degrees (Swiss Ephemeris SIDM_RAMAN).
+   *
+   * SE definition (Robert Hand / B.V. Raman mode):
+   *   t0 = J1900.0 (JD 2415020.0)
+   *   ayan(t0) = 360° − 338.98556° = 21.01444°
+   *   constant rate = 50.333333333″/year (not modern variable precession)
+   *
+   * Never substitute Lahiri or any other ayanāṃśa here.
+   */
+  function ramanAyanamsa(time) {
+    // Astronomy.MakeTime: time.tt = TT days since J2000.0 (JD 2451545.0)
+    const jd = 2451545.0 + (time && typeof time.tt === "number" ? time.tt : 0);
+    const jd1900 = 2415020.0;
+    const years = (jd - jd1900) / 365.25;
+    const ayan0 = 360 - 338.98556; // 21.01444°
+    const rateDegPerYear = 50.333333333 / 3600; // "/yr → °/yr
+    return ayan0 + rateDegPerYear * years;
+  }
+
+  /** @deprecated Use ramanAyanamsa — name kept only as alias that still returns Raman */
+  function ayanamsa(time) {
+    return ramanAyanamsa(time);
   }
 
   function tropicalToSidereal(tropLon, time) {
-    return norm360(tropLon - lahiriAyanamsa(time));
+    return norm360(tropLon - ramanAyanamsa(time));
   }
 
   function siderealToTropical(sidLon, time) {
-    return norm360(sidLon + lahiriAyanamsa(time));
+    return norm360(sidLon + ramanAyanamsa(time));
   }
 
   function nakshatraIndex(sidLon) {
@@ -206,7 +224,8 @@
     RASIS,
     GRAHAS,
     norm360,
-    lahiriAyanamsa,
+    ramanAyanamsa,
+    ayanamsa, // always Raman
     tropicalToSidereal,
     siderealToTropical,
     nakshatraIndex,

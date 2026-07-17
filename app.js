@@ -616,7 +616,7 @@
     const Ex = X();
     const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
     const time = Astronomy.MakeTime(new Date());
-    const aya = Ex.lahiriAyanamsa(time);
+    const aya = Ex.ramanAyanamsa(time);
     const out = [];
 
     // Always compute all layers; UI shows one at a time
@@ -1217,7 +1217,7 @@
     },
     rasi: {
       title: "Zodiac · Rāśi",
-      hint: "12 rāśis · sidereal (Lahiri)",
+      hint: "12 rāśis · sidereal Raman only",
     },
     iss: {
       title: "ISS",
@@ -1430,7 +1430,7 @@
       fov.h.toFixed(0) +
       "° · aya " +
       (state._aya != null ? state._aya.toFixed(2) + "°" : "—") +
-      " Lahiri" +
+      " Raman" +
       iss;
   }
 

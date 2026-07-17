@@ -2,6 +2,8 @@
 
 Simple web app: point your phone at the sky, see which planet you’re looking at, and follow on-screen arrows to a planet you pick.
 
+**Ayanāṃśa: Raman only** (Swiss Ephemeris `SIDM_RAMAN`). Lahiri and all other ayanāṃśas are banned.
+
 ## Live on iPhone (free HTTPS)
 
 **https://taem-jyothisha.github.io/sky-planet-finder/**
