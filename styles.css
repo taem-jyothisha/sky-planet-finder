@@ -467,13 +467,34 @@ body.guiding .map-controls.force-show {
   cursor: pointer;
   color: #222;
 }
+.layer-card {
+  position: relative;
+}
 .layer-card.active {
   border-color: #1a73e8;
   background: #e8f0fe;
 }
+.layer-card .lc-on {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+.layer-card.active .lc-on {
+  color: #1a73e8;
+}
 .lc-icon { font-size: 1.1rem; }
 .lc-name { font-size: 0.82rem; font-weight: 750; }
 .lc-desc { font-size: 0.62rem; color: #666; line-height: 1.25; }
+.layer-panel-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  color: #666;
+  line-height: 1.35;
+}
 .panel-check {
   margin-top: 0.55rem;
   font-size: 0.75rem;

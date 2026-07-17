@@ -93,9 +93,11 @@
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
-    /** Only one layer shown on camera + list at a time */
+    /** Which overlays are drawn on camera (multi-select, Maps-style) */
+    overlays: { graha: true, rasi: true, nakshatra: true, iss: false },
+    /** Which list Find opens (last focused layer) */
     activeLayer: "graha",
-    onlyAbove: true,
+    onlyAbove: false,
     running: false,
     /** UI: layers panel / find panel open */
     layersOpen: false,
@@ -1027,123 +1029,103 @@
       ctx.textAlign = "start";
     }
 
-    // Ecliptic guide for zodiac / nakṣatra layers
-    if (state.activeLayer === "rasi" || state.activeLayer === "nakshatra") {
-      drawEclipticBand(w, h);
-    }
+    // ── Sky belts (zodiac + nakṣatra) under point markers ──
+    if (state.overlays.rasi) drawZodiacBelt(w, h);
+    if (state.overlays.nakshatra) drawNakshatraBelt(w, h);
 
     let nearest = null;
     let nearestPointlike = null;
 
-    // Always overlay active layer on camera (+ selected target)
+    // Point markers: all enabled overlays + selected target
     const drawList = state.objects.filter(
-      (o) => o.kind === state.activeLayer || o.id === state.targetId
+      (o) =>
+        (o.kind === "graha" && state.overlays.graha) ||
+        (o.kind === "iss" && state.overlays.iss) ||
+        // Rāśi/nak markers are belt labels; still allow selected find-target
+        o.id === state.targetId ||
+        (o.kind === "rasi" && state.overlays.rasi && false) || // belt handles rasi
+        (o.kind === "nakshatra" && state.overlays.nakshatra && false)
     );
+    // Always include graha points when graha overlay on (all 9, even below horizon)
+    // Rebuild clean list:
+    const points = state.objects.filter((o) => {
+      if (o.id === state.targetId) return true;
+      if (o.kind === "graha" && state.overlays.graha) return true;
+      if (o.kind === "iss" && state.overlays.iss) return true;
+      return false;
+    });
 
-    for (const obj of drawList) {
-      // Keep near-horizon objects; only skip deep below unless selected
-      if (obj.alt < -8 && obj.id !== state.targetId) continue;
+    for (const obj of points) {
       const p = project(obj);
       if (!p) continue;
 
-      if (obj.kind === state.activeLayer) {
+      if (obj.kind === "graha" || obj.kind === "iss") {
         if (!nearest || p.angDist < nearest.angDist) nearest = { obj, ...p };
-        const pointlike = obj.kind === "graha" || obj.kind === "iss";
-        if (pointlike && (!nearestPointlike || p.angDist < nearestPointlike.angDist)) {
+        if (!nearestPointlike || p.angDist < nearestPointlike.angDist) {
           nearestPointlike = { obj, ...p };
         }
       }
 
       const isTarget = obj.id === state.targetId;
-      // Show everything in/near the viewfinder — overlays must feel dense like a sky map
+      // All 9 grahas: show if in FOV, near FOV, or selected; below-horizon get edge hint when selected
       const drawIt =
         isTarget ||
         p.inFov ||
-        p.angDist < (obj.kind === "nakshatra" ? 22 : obj.kind === "rasi" ? 28 : 40);
+        (obj.kind === "graha" && p.angDist < 55) ||
+        (obj.kind === "iss" && p.angDist < 45);
 
       if (!drawIt) continue;
 
-      // Only clamp the selected guide target — other markers must stay honest on-sky
       let px = p.x;
       let py = p.y;
-      if (isTarget && !p.inFov) {
+      if ((isTarget || (obj.kind === "graha" && !p.inFov && p.angDist < 80)) && !p.inFov) {
         const clamped = clampToFrame(p.x, p.y, w, h, 24);
         px = clamped.x;
         py = clamped.y;
-      } else if (!p.inFov && p.angDist > 50) {
-        continue; // don't pin the whole sky to the frame edge
+      } else if (!p.inFov) {
+        continue;
       }
 
-      let r = 7;
+      let r = 8;
       if (obj.kind === "iss") r = 11;
-      else if (obj.kind === "rasi") r = 6;
-      else if (obj.kind === "nakshatra") r = 5;
-      else if (obj.label === "Sūrya") r = 15;
-      else if (obj.label === "Candra") r = 13;
-      else if (obj.mag != null && obj.mag < 0) r = 10;
+      else if (obj.label === "Sūrya") r = 16;
+      else if (obj.label === "Candra") r = 14;
+      else if (obj.mag != null && obj.mag < 0) r = 11;
 
-      const alpha = p.inFov ? 1 : isTarget ? 0.85 : 0.4;
+      const alpha = p.inFov ? 1 : isTarget ? 0.9 : obj.alt < 0 ? 0.45 : 0.55;
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      if (obj.kind === "rasi" || obj.kind === "nakshatra") {
-        // Diamond for regions
+      ctx.beginPath();
+      ctx.arc(px, py, r + 12, 0, Math.PI * 2);
+      ctx.fillStyle = (obj.color.length === 7 ? obj.color + "55" : "rgba(255,255,255,0.2)");
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = obj.color;
+      ctx.fill();
+      ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
+      ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.95)";
+      ctx.stroke();
+      if (obj.kind === "iss") {
         ctx.beginPath();
-        ctx.moveTo(px, py - r - 2);
-        ctx.lineTo(px + r, py);
-        ctx.lineTo(px, py + r + 2);
-        ctx.lineTo(px - r, py);
-        ctx.closePath();
-        ctx.fillStyle = obj.color;
-        ctx.globalAlpha = alpha * 0.85;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.7)";
-        ctx.lineWidth = 1.5;
+        ctx.moveTo(px - r - 8, py);
+        ctx.lineTo(px + r + 8, py);
+        ctx.moveTo(px, py - r - 4);
+        ctx.lineTo(px, py + r + 4);
         ctx.stroke();
-      } else {
-        ctx.beginPath();
-        ctx.arc(px, py, r + 10, 0, Math.PI * 2);
-        ctx.fillStyle = obj.color + "44";
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI * 2);
-        ctx.fillStyle = obj.color;
-        ctx.fill();
-        ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
-        ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.9)";
-        ctx.stroke();
-        if (obj.kind === "iss") {
-          // ISS cross wings
-          ctx.strokeStyle = "#6dffa8";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(px - r - 8, py);
-          ctx.lineTo(px + r + 8, py);
-          ctx.moveTo(px, py - r - 4);
-          ctx.lineTo(px, py + r + 4);
-          ctx.stroke();
-        }
       }
 
-      const kindTag =
-        obj.kind === "graha"
-          ? ""
-          : obj.kind === "iss"
-            ? " 🛰"
-            : obj.kind === "rasi"
-              ? " · rāśi"
-              : " · nak";
       const label =
         obj.label +
-        kindTag +
         (obj.alt < 0 ? " ↓" : "") +
-        (!p.inFov ? " · " + p.angDist.toFixed(0) + "°" : "");
-      ctx.font = (obj.kind === "nakshatra" ? "600 11px" : "700 13px") + " -apple-system, system-ui, sans-serif";
+        (obj.rasi ? " · " + obj.rasi : "");
+      ctx.font = "700 13px -apple-system, system-ui, sans-serif";
       const tw = ctx.measureText(label).width;
       const lx = px - tw / 2;
       const ly = py - r - 14;
-      ctx.globalAlpha = Math.min(1, alpha + 0.15);
-      ctx.fillStyle = "rgba(0,0,0,0.62)";
+      ctx.globalAlpha = Math.min(1, alpha + 0.2);
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
       roundRect(ctx, lx - 6, ly - 12, tw + 12, 20, 8);
       ctx.fill();
       ctx.fillStyle = "#fff";
@@ -1151,7 +1133,7 @@
 
       if (isTarget) {
         ctx.beginPath();
-        ctx.arc(px, py, r + 16, 0, Math.PI * 2);
+        ctx.arc(px, py, r + 18, 0, Math.PI * 2);
         ctx.strokeStyle = "#ffd27a";
         ctx.lineWidth = 2.5;
         ctx.setLineDash([5, 4]);
@@ -1169,39 +1151,156 @@
     updateDebug();
   }
 
-  function drawEclipticBand(w, h) {
+  /** Project sidereal ecliptic lon/lat (Raman) → screen point or null */
+  function projectSiderealEcliptic(sidLon, eclLat, Ex, time, observer) {
+    try {
+      const trop = Ex.siderealToTropical(sidLon, time);
+      const hor = Ex.eclipticToHorizon(trop, eclLat, time, observer);
+      if (hor.altitude < -25) return null;
+      return project({ az: hor.azimuth, alt: hor.altitude });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Zodiac belt: thick band ±8° ecliptic latitude, 12 rāśi segments (Raman).
+   */
+  function drawZodiacBelt(w, h) {
     if (state.heading == null || state.pitch == null || !X() || state.lat == null) return;
     if (typeof Astronomy === "undefined") return;
     const Ex = X();
     const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
     const time = Astronomy.MakeTime(new Date());
+    const step = 3;
+    const halfW = 8; // degrees ecliptic latitude half-width
+
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 210, 122, 0.35)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    let started = false;
-    for (let lon = 0; lon <= 360; lon += 4) {
-      try {
-        const hor = Ex.eclipticToHorizon(lon, 0, time, observer);
-        if (hor.altitude < -15) {
-          started = false;
-          continue;
-        }
-        const fake = { az: hor.azimuth, alt: hor.altitude };
-        const p = project(fake);
-        if (!p || !p.inFov) {
-          started = false;
-          continue;
-        }
-        if (!started) {
-          ctx.moveTo(p.x, p.y);
-          started = true;
-        } else ctx.lineTo(p.x, p.y);
-      } catch (_) {
-        started = false;
+    for (let i = 0; i < 12; i++) {
+      const sid0 = i * 30;
+      const sid1 = (i + 1) * 30;
+      const top = [];
+      const bot = [];
+      for (let s = sid0; s <= sid1 + 0.001; s += step) {
+        const sid = Math.min(s, sid1);
+        const pt = projectSiderealEcliptic(sid, halfW, Ex, time, observer);
+        const pb = projectSiderealEcliptic(sid, -halfW, Ex, time, observer);
+        if (pt && pt.inFov) top.push(pt);
+        if (pb && pb.inFov) bot.push(pb);
+      }
+      if (top.length < 2 || bot.length < 2) continue;
+
+      // Segment fill
+      const hue = i * 30;
+      ctx.beginPath();
+      ctx.moveTo(top[0].x, top[0].y);
+      for (let k = 1; k < top.length; k++) ctx.lineTo(top[k].x, top[k].y);
+      for (let k = bot.length - 1; k >= 0; k--) ctx.lineTo(bot[k].x, bot[k].y);
+      ctx.closePath();
+      ctx.fillStyle = "hsla(" + hue + ", 70%, 60%, 0.16)";
+      ctx.fill();
+      ctx.strokeStyle = "hsla(" + hue + ", 80%, 70%, 0.55)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      // Center line + label at segment mid
+      const mid = projectSiderealEcliptic(sid0 + 15, 0, Ex, time, observer);
+      if (mid && mid.inFov) {
+        const name = Ex.RASIS[i].label;
+        ctx.font = "700 12px -apple-system, system-ui, sans-serif";
+        const tw = ctx.measureText(name).width;
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        roundRect(ctx, mid.x - tw / 2 - 5, mid.y - 9, tw + 10, 18, 6);
+        ctx.fill();
+        ctx.fillStyle = "hsla(" + hue + ", 90%, 85%, 1)";
+        ctx.fillText(name, mid.x - tw / 2, mid.y + 4);
       }
     }
+
+    // Ecliptic spine
+    ctx.beginPath();
+    let started = false;
+    for (let sid = 0; sid <= 360; sid += 2) {
+      const p = projectSiderealEcliptic(sid, 0, Ex, time, observer);
+      if (!p || !p.inFov) {
+        started = false;
+        continue;
+      }
+      if (!started) {
+        ctx.moveTo(p.x, p.y);
+        started = true;
+      } else ctx.lineTo(p.x, p.y);
+    }
+    ctx.strokeStyle = "rgba(255, 210, 122, 0.75)";
+    ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Nakṣatra band: thinner strip ±5° with 27 mansion labels (Raman).
+   */
+  function drawNakshatraBelt(w, h) {
+    if (state.heading == null || state.pitch == null || !X() || state.lat == null) return;
+    if (typeof Astronomy === "undefined") return;
+    const Ex = X();
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    const width = 360 / 27;
+    const step = 2;
+    const halfW = 5;
+
+    ctx.save();
+    for (let i = 0; i < 27; i++) {
+      const sid0 = i * width;
+      const sid1 = (i + 1) * width;
+      const top = [];
+      const bot = [];
+      for (let s = sid0; s <= sid1 + 0.001; s += step) {
+        const sid = Math.min(s, sid1);
+        const pt = projectSiderealEcliptic(sid, halfW, Ex, time, observer);
+        const pb = projectSiderealEcliptic(sid, -halfW, Ex, time, observer);
+        if (pt && pt.inFov) top.push(pt);
+        if (pb && pb.inFov) bot.push(pb);
+      }
+      if (top.length < 2 || bot.length < 2) continue;
+
+      const hue = Math.round((i * 13.333 + 200) % 360);
+      ctx.beginPath();
+      ctx.moveTo(top[0].x, top[0].y);
+      for (let k = 1; k < top.length; k++) ctx.lineTo(top[k].x, top[k].y);
+      for (let k = bot.length - 1; k >= 0; k--) ctx.lineTo(bot[k].x, bot[k].y);
+      ctx.closePath();
+      ctx.fillStyle = "hsla(" + hue + ", 55%, 55%, 0.12)";
+      ctx.fill();
+      ctx.strokeStyle = "hsla(" + hue + ", 70%, 75%, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Boundary tick at start of mansion
+      const edge = projectSiderealEcliptic(sid0, 0, Ex, time, observer);
+      if (edge && edge.inFov) {
+        ctx.beginPath();
+        ctx.arc(edge.x, edge.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = "hsla(" + hue + ", 80%, 80%, 0.9)";
+        ctx.fill();
+      }
+
+      const mid = projectSiderealEcliptic(sid0 + width / 2, 0, Ex, time, observer);
+      if (mid && mid.inFov) {
+        const name = Ex.NAKSHATRAS[i];
+        // Shorten long names for readability
+        const short =
+          name.length > 10 ? name.replace("Pūrva ", "P.").replace("Uttara ", "U.") : name;
+        ctx.font = "600 10px -apple-system, system-ui, sans-serif";
+        const tw = ctx.measureText(short).width;
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        roundRect(ctx, mid.x - tw / 2 - 4, mid.y + 6, tw + 8, 15, 5);
+        ctx.fill();
+        ctx.fillStyle = "hsla(" + hue + ", 85%, 88%, 1)";
+        ctx.fillText(short, mid.x - tw / 2, mid.y + 17);
+      }
+    }
     ctx.restore();
   }
 
@@ -1237,7 +1336,9 @@
 
     for (const obj of state.objects) {
       if (obj.alt < 0 || state.heading == null) continue;
-      if (obj.kind !== state.activeLayer) continue;
+      if (obj.kind === "graha" && !state.overlays.graha) continue;
+      if (obj.kind === "iss" && !state.overlays.iss) continue;
+      if (obj.kind === "rasi" || obj.kind === "nakshatra") continue;
       const dAz = deltaAngle(state.heading, obj.az);
       const rr = R * (1 - Math.max(0, Math.min(90, obj.alt)) / 100);
       const rad = (dAz * Math.PI) / 180;
@@ -1418,16 +1519,16 @@
 
   const LAYER_COPY = {
     graha: {
-      title: "Graha",
-      hint: "Nine grahas · tap one for arrow guide",
+      title: "Graha · all 9",
+      hint: "Sūrya…Ketu · Raman · always all 9 in list",
     },
     nakshatra: {
-      title: "Nakṣatra",
-      hint: "27 lunar mansions on the ecliptic",
+      title: "Nakṣatra belt",
+      hint: "27 mansions · camera band overlay",
     },
     rasi: {
-      title: "Zodiac · Rāśi",
-      hint: "12 rāśis · sidereal Raman only",
+      title: "Zodiac belt",
+      hint: "12 rāśis · ecliptic band · Raman",
     },
     iss: {
       title: "ISS",
@@ -1437,14 +1538,29 @@
 
   function objectsForActiveLayer() {
     let items = state.objects.filter((o) => o.kind === state.activeLayer);
-    if (state.onlyAbove) {
-      items = items.filter((o) => o.alt >= -1);
-      // If everything filtered out, still show below-horizon so user sees list
-      if (!items.length) {
-        items = state.objects.filter((o) => o.kind === state.activeLayer);
-      }
+    // Graha layer: ALWAYS all 9 (never hide below-horizon from the list)
+    if (state.activeLayer === "graha") {
+      // stable order: Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn, Rahu, Ketu
+      const order = [
+        "graha:Sun",
+        "graha:Moon",
+        "graha:Mars",
+        "graha:Mercury",
+        "graha:Jupiter",
+        "graha:Venus",
+        "graha:Saturn",
+        "graha:Rahu",
+        "graha:Ketu",
+      ];
+      items = order
+        .map((id) => state.objects.find((o) => o.id === id))
+        .filter(Boolean);
+      return items;
     }
-    // Sort: above first, then closest to aim, then by name
+    if (state.onlyAbove) {
+      const up = items.filter((o) => o.alt >= -1);
+      if (up.length) items = up;
+    }
     items = items.slice().sort((a, b) => {
       const au = a.alt >= 0 ? 0 : 1;
       const bu = b.alt >= 0 ? 0 : 1;
@@ -1462,7 +1578,13 @@
   function updateLayerChrome() {
     const copy = LAYER_COPY[state.activeLayer] || LAYER_COPY.graha;
     if (els.listTitle) els.listTitle.textContent = copy.title;
-    if (els.layerHint) els.layerHint.textContent = copy.hint;
+    if (els.layerHint) {
+      if (state.activeLayer === "graha") {
+        els.layerHint.textContent = "All 9 grahas · Raman · tap to guide";
+      } else {
+        els.layerHint.textContent = copy.hint;
+      }
+    }
     if (els.findFabLabel) {
       els.findFabLabel.textContent =
         state.activeLayer === "graha"
@@ -1476,8 +1598,25 @@
 
     els.layerCards?.forEach((card) => {
       const layer = card.getAttribute("data-layer");
-      card.classList.toggle("active", layer === state.activeLayer);
+      const on = !!state.overlays[layer];
+      card.classList.toggle("active", on);
+      card.setAttribute("aria-pressed", on ? "true" : "false");
+      const badge = card.querySelector(".lc-on");
+      if (badge) badge.textContent = on ? "ON" : "OFF";
     });
+  }
+
+  function toggleOverlay(layer) {
+    if (!(layer in state.overlays)) return;
+    state.overlays[layer] = !state.overlays[layer];
+    // Keep at least one overlay on
+    if (!Object.values(state.overlays).some(Boolean)) {
+      state.overlays[layer] = true;
+    }
+    state.activeLayer = layer;
+    if (layer === "iss") refreshISS(true).catch(() => {});
+    updateLayerChrome();
+    if (state.findOpen) buildObjectList();
   }
 
   function setLayersOpen(open) {
@@ -1607,6 +1746,8 @@
   function setActiveLayer(layer) {
     if (!LAYER_COPY[layer]) return;
     state.activeLayer = layer;
+    // Ensure this overlay is on when focusing Find list
+    state.overlays[layer] = true;
     if (state.targetId) {
       const t = state.objects.find((o) => o.id === state.targetId);
       if (!t || t.kind !== layer) state.targetId = null;
@@ -1616,8 +1757,7 @@
     updateGuide();
     buildObjectList();
     syncGuidingUi();
-    // Keep overlays refreshing immediately
-    if (state.running) draw();
+    if (state.running && ctx) draw();
   }
 
   function updateDebug() {
@@ -1910,10 +2050,15 @@
     });
 
     els.layerCards?.forEach((card) => {
-      card.addEventListener("click", () => {
-        setActiveLayer(card.getAttribute("data-layer"));
+      card.addEventListener("click", (ev) => {
+        const layer = card.getAttribute("data-layer");
+        // Toggle overlay on camera
+        toggleOverlay(layer);
+        // Double-purpose: open Find list for this layer (graha shows all 9)
+        state.activeLayer = layer;
         setLayersOpen(false);
         setFindOpen(true);
+        buildObjectList();
       });
     });
     els.onlyAbove?.addEventListener("change", () => {
