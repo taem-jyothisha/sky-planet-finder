@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sky" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#050814" />
+  <meta name="description" content="Point your iPhone at the sky to find planets with live camera guides." />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <title>Sky · Find planets</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Camera -->
+    <video id="camera" playsinline webkit-playsinline muted autoplay></video>
+    <canvas id="skyCanvas" aria-hidden="true"></canvas>
+
+    <!-- Top status -->
+    <header class="top-bar">
+      <div class="brand">
+        <span class="logo">✦</span>
+        <span>Sky</span>
+      </div>
+      <div id="statusChip" class="chip muted">Starting…</div>
+    </header>
+
+    <!-- Crosshair -->
+    <div class="crosshair" aria-hidden="true">
+      <span class="ring"></span>
+      <span class="dot"></span>
+    </div>
+
+    <!-- Guidance when hunting a planet -->
+    <div id="guideArrow" class="guide-arrow hidden" aria-live="polite">
+      <div class="arrow-shaft">
+        <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+          <path d="M32 6 L54 34 H40 V58 H24 V34 H10 Z" fill="currentColor"/>
+        </svg>
+      </div>
+      <div id="guideText" class="guide-text">Point here</div>
+      <div id="guideMeta" class="guide-meta"></div>
+    </div>
+
+    <!-- Locked-on badge -->
+    <div id="lockedBadge" class="locked-badge hidden">
+      <strong id="lockedName">—</strong>
+      <span id="lockedDetail"></span>
+    </div>
+
+    <!-- HUD: what you're pointing at -->
+    <div id="pointingHud" class="pointing-hud">
+      <div class="hud-label">Looking toward</div>
+      <div id="pointingMain" class="hud-main">—</div>
+      <div id="pointingSub" class="hud-sub">Enable location &amp; compass</div>
+    </div>
+
+    <!-- Bottom: planet picker -->
+    <footer class="bottom-sheet">
+      <div class="sheet-head">
+        <h1>Find a planet</h1>
+        <button type="button" id="btnClearTarget" class="text-btn hidden">Clear guide</button>
+      </div>
+      <div id="planetList" class="planet-list" role="listbox" aria-label="Planets"></div>
+      <div class="sheet-foot">
+        <label class="calib">
+          Compass trim
+          <input type="range" id="headingOffset" min="-45" max="45" value="0" />
+          <span id="headingOffsetVal">0°</span>
+        </label>
+        <button type="button" id="btnStart" class="primary-btn">Start sky view</button>
+      </div>
+      <p class="disclaimer">
+        Approximate AR guide · uses your location, time, and device compass.
+        Best outdoors · hold phone upright · calibrate compass if off.
+      </p>
+    </footer>
+
+    <!-- Permission / start overlay -->
+    <div id="gate" class="gate">
+      <div class="gate-card">
+        <div class="gate-icon">☾</div>
+        <h2>Point at the sky</h2>
+        <p>
+          Live camera + on-screen labels show which planet you’re looking at.
+          Pick a planet below to get arrows guiding you toward it.
+        </p>
+        <ul class="gate-needs">
+          <li>Camera (rear)</li>
+          <li>Location (for sky positions)</li>
+          <li>Motion / compass (to aim)</li>
+        </ul>
+        <p class="ios-hint">
+          <strong>iPhone:</strong> use Safari · when asked, allow Camera, Location, and Motion.
+          Then Share → <strong>Add to Home Screen</strong> for a full-screen app icon.
+        </p>
+        <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
+        <p id="gateError" class="error" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

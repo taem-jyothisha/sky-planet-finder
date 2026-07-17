@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Sky">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#1a2a55"/>
+      <stop offset="100%" stop-color="#050814"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#g)"/>
+  <circle cx="92" cy="36" r="10" fill="#ffd27a"/>
+  <circle cx="38" cy="48" r="5" fill="#f0b878"/>
+  <circle cx="58" cy="78" r="4" fill="#ff7a5c"/>
+  <circle cx="84" cy="88" r="3.5" fill="#7eb6ff"/>
+  <path d="M24 96c18-22 38-28 62-18" stroke="#e8eefc" stroke-width="2" fill="none" opacity="0.45"/>
+  <text x="64" y="118" text-anchor="middle" fill="#9aa8c7" font-size="14" font-family="system-ui,sans-serif" font-weight="700">Sky</text>
+</svg>

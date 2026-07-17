@@ -1,0 +1,18 @@
+{
+  "name": "Sky · Find planets",
+  "short_name": "Sky",
+  "description": "Point your phone at the sky to identify and find planets.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#050814",
+  "theme_color": "#050814",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
