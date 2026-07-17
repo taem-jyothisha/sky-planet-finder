@@ -114,38 +114,41 @@
   }
 
   /**
-   * Ecliptic of date (lon, lat deg) → horizontal az/alt for observer.
+   * True ecliptic of date (lon, lat deg) → horizontal az/alt for observer.
+   * MUST use ECT (of date), not ECL (J2000 mean).
    */
   function eclipticToHorizon(lonDeg, latDeg, time, observer) {
     const lon = (lonDeg * Math.PI) / 180;
     const lat = (latDeg * Math.PI) / 180;
     const cosLat = Math.cos(lat);
-    const ecl = new Astronomy.Vector(
+    const ect = new Astronomy.Vector(
       cosLat * Math.cos(lon),
       cosLat * Math.sin(lon),
       Math.sin(lat),
       time
     );
-    const rot = Astronomy.Rotation_ECL_EQD(time);
-    const eqd = Astronomy.RotateVector(rot, ecl);
+    // True ecliptic of date → equator of date
+    const rot =
+      typeof Astronomy.Rotation_ECT_EQD === "function"
+        ? Astronomy.Rotation_ECT_EQD(time)
+        : Astronomy.Rotation_ECL_EQD(time);
+    const eqd = Astronomy.RotateVector(rot, ect);
     const equ = Astronomy.EquatorFromVector(eqd);
     return Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
   }
 
-  /** Tropical ecliptic longitude of a body (deg) */
+  /** Geocentric tropical ecliptic longitude of a body (deg) — for Vedic labels */
   function tropicalEclipticLon(bodyId, time) {
     if (bodyId === "Moon") {
       return norm360(Astronomy.EclipticGeoMoon(time).lon);
     }
     if (bodyId === "Sun") {
-      // SunPosition.elon is ecliptic longitude
-      try {
-        return norm360(Astronomy.SunPosition(time).elon);
-      } catch (_) {
-        return norm360(Astronomy.EclipticLongitude("Sun", time));
-      }
+      return norm360(Astronomy.SunPosition(time).elon);
     }
-    return norm360(Astronomy.EclipticLongitude(bodyId, time));
+    // Geocentric vector → of-date ecliptic longitude (NOT heliocentric EclipticLongitude)
+    const geo = Astronomy.GeoVector(bodyId, time, true);
+    const ecl = Astronomy.Ecliptic(geo);
+    return norm360(ecl.elon);
   }
 
   /**

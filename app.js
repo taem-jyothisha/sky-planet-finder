@@ -67,7 +67,10 @@
     onlyAbove: $("onlyAbove"),
   };
 
-  const ctx = els.canvas.getContext("2d");
+  if (!els.canvas) {
+    console.error("skyCanvas missing — app cannot start");
+  }
+  const ctx = els.canvas ? els.canvas.getContext("2d") : null;
 
   const state = {
     stream: null,
@@ -109,6 +112,7 @@
   };
 
   function setStatus(text, kind) {
+    if (!els.statusChip) return;
     els.statusChip.textContent = text;
     els.statusChip.className = "chip " + (kind || "muted");
   }
@@ -158,46 +162,48 @@
   }
 
   /**
-   * Effective FOV of what's visible on screen after object-fit:cover + zoom.
-   * Critical for AR alignment — wrong FOV = labels slide off the real sky.
+   * Effective FOV after object-fit:cover + zoom.
+   * Phones often report landscape video buffers while UI is portrait —
+   * we match buffer axes to the upright display before computing cover crop.
    */
   function viewFov() {
     const z = Math.max(0.5, state.zoom || 1);
     const vid = els.camera;
-    const vw = vid.videoWidth || 1920;
-    const vh = vid.videoHeight || 1080;
+    let vw = (vid && vid.videoWidth) || 1920;
+    let vh = (vid && vid.videoHeight) || 1080;
     const { w: sw, h: sh } = cssSize();
-    const videoAspect = vw / Math.max(1, vh);
     const screenAspect = sw / Math.max(1, sh);
 
-    // Full-frame camera FOV at this zoom (uncropped stream)
-    const fullH = BASE_H_FOV_1X / z;
-    const fullV =
-      ((2 * Math.atan(Math.tan(((fullH / 2) * Math.PI) / 180) / videoAspect)) *
+    // If buffer is landscape but screen is portrait (or vice versa), swap buffer axes
+    // so "width" matches the displayed upright frame after CSS cover.
+    let videoAspect = vw / Math.max(1, vh);
+    if (
+      (screenAspect < 1 && videoAspect > 1.15) ||
+      (screenAspect > 1.15 && videoAspect < 1)
+    ) {
+      const t = vw;
+      vw = vh;
+      vh = t;
+      videoAspect = vw / Math.max(1, vh);
+    }
+
+    // Base optical FOV on the wider sensor axis ≈ BASE_H at 1×
+    const fullW = BASE_H_FOV_1X / z;
+    const fullH =
+      ((2 * Math.atan(Math.tan(((fullW / 2) * Math.PI) / 180) * (vh / vw))) *
         180) /
       Math.PI;
 
-    // object-fit: cover — only a center crop of the video is visible
-    let visibleHFrac = 1;
-    let visibleVFrac = 1;
-    if (videoAspect > screenAspect) {
-      // sides cropped
-      visibleHFrac = screenAspect / videoAspect;
-      visibleVFrac = 1;
-    } else {
-      // top/bottom cropped
-      visibleHFrac = 1;
-      visibleVFrac = videoAspect / screenAspect;
-    }
+    // object-fit: cover visible fractions
+    const scale = Math.max(sw / vw, sh / vh);
+    const visibleWFrac = Math.min(1, sw / (vw * scale));
+    const visibleHFrac = Math.min(1, sh / (vh * scale));
 
-    return {
-      h: fullH * visibleHFrac,
-      v: fullV * visibleVFrac,
-      fullH,
-      fullV,
-      videoAspect,
-      screenAspect,
-    };
+    // Clamp so portrait never collapses to ~15° (kills AR)
+    const h = Math.max(40, Math.min(100, fullW * visibleWFrac));
+    const v = Math.max(50, Math.min(120, fullH * visibleHFrac));
+
+    return { h, v, fullW, fullH, videoAspect, screenAspect, z };
   }
 
   /**
@@ -253,6 +259,10 @@
   }
 
   function cssSize() {
+    const vv = window.visualViewport;
+    if (vv && vv.width && vv.height) {
+      return { w: Math.round(vv.width), h: Math.round(vv.height) };
+    }
     return { w: window.innerWidth, h: window.innerHeight };
   }
 
@@ -284,53 +294,76 @@
     });
   }
 
-  async function requestOrientationPermission() {
-    // Never block forever — iOS may leave the prompt pending
-    const run = async () => {
-      if (
-        typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function"
-      ) {
-        const res = await DeviceOrientationEvent.requestPermission();
-        if (res !== "granted") {
-          throw new Error(
-            "Motion denied. Settings → Safari → Motion & Orientation → Allow."
-          );
-        }
-      }
-      if (
-        typeof DeviceMotionEvent !== "undefined" &&
-        typeof DeviceMotionEvent.requestPermission === "function"
-      ) {
-        try {
-          await DeviceMotionEvent.requestPermission();
-        } catch (_) {}
-      }
-    };
-    await withTimeout(run(), 12000, "Motion permission");
-  }
-
   function applyAim(headingRaw, pitchRaw, source) {
     if (headingRaw == null || pitchRaw == null) return;
     if (Number.isNaN(headingRaw) || Number.isNaN(pitchRaw)) return;
+
+    const prevH = state.headingRaw;
+    const prevP = state.pitchRaw;
+    const dH = prevH == null ? 99 : Math.abs(deltaAngle(prevH, headingRaw));
+    const dP = prevP == null ? 99 : Math.abs(pitchRaw - prevP);
+    const moved = dH + dP > 0.12;
 
     state.headingRaw = headingRaw;
     state.pitchRaw = Math.max(-89, Math.min(89, pitchRaw));
     state.orientSource = source || state.orientSource || "?";
     state.orientReady = true;
-    state.lastOrientTs = performance.now();
     state.orientEventCount = (state.orientEventCount || 0) + 1;
+    // Only mark "fresh orient sample" when values actually change (enables gyro rescue)
+    if (moved) {
+      state.lastOrientTs = performance.now();
+      state.lastAimMoveTs = performance.now();
+    }
 
-    // Light smoothing only — must still track pan in real time
-    const hTarget = norm360(headingRaw + state.headingOffset);
+    // Fast tracking — high alpha so pan feels live
+    const hTarget = norm360(headingRaw + state.headingOffset + (state.northBias || 0));
     const pTarget = state.pitchRaw + state.pitchOffset;
-    state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, 0.72);
-    state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, 0.72);
+    state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, 0.85);
+    state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, 0.85);
     state.heading = state.smoothHeading;
     state.pitch = state.smoothPitch;
   }
 
+  function compassToLookAz(compass) {
+    let c = compass;
+    if (state.screenAngle === 90) c = norm360(c + 90);
+    else if (state.screenAngle === -90 || state.screenAngle === 270)
+      c = norm360(c - 90);
+    else if (state.screenAngle === 180) c = norm360(c + 180);
+    return c;
+  }
+
+  /** Slow north bias from compass — NEVER per-event 15% mix (that freezes iOS) */
+  function maybeUpdateNorthBias(matrixAz, compass) {
+    if (compass == null) return;
+    const now = performance.now();
+    if (state._lastBiasTs && now - state._lastBiasTs < 500) return;
+    const acc =
+      typeof state._lastCompassAccuracy === "number"
+        ? state._lastCompassAccuracy
+        : 1;
+    if (acc < 0) return; // iOS: unreliable
+
+    const c = compassToLookAz(compass);
+    // Sticky compass: ignore if unchanged while we are moving
+    if (
+      state._lastCompassUsed != null &&
+      Math.abs(deltaAngle(state._lastCompassUsed, c)) < 0.2
+    ) {
+      return;
+    }
+    state._lastCompassUsed = c;
+    state._lastBiasTs = now;
+
+    // Bias maps matrix az → compass az; apply slowly
+    const err = deltaAngle(matrixAz + (state.northBias || 0), c);
+    state.northBias = (state.northBias || 0) + err * 0.08;
+  }
+
   function onOrientation(e) {
+    // Prefer a single stream: absolute events win when flagged
+    if (e && e.absolute === false && state._preferAbsolute) return;
+
     updateScreenAngle();
     state._gotOrientEvent = true;
 
@@ -344,11 +377,12 @@
       !Number.isNaN(e.webkitCompassHeading)
         ? e.webkitCompassHeading
         : null;
-
-    // Need at least tilt (beta) for pitch; gamma may be 0 (valid)
-    if (beta == null && gamma == null && compass == null && alpha == null) {
-      return;
+    if (typeof e.webkitCompassAccuracy === "number") {
+      state._lastCompassAccuracy = e.webkitCompassAccuracy;
     }
+    if (e.absolute === true) state._preferAbsolute = true;
+
+    if (beta == null && gamma == null && compass == null && alpha == null) return;
 
     const b = beta != null ? beta : state._lastBeta != null ? state._lastBeta : 90;
     const g = gamma != null ? gamma : state._lastGamma != null ? state._lastGamma : 0;
@@ -356,62 +390,52 @@
     if (gamma != null) state._lastGamma = gamma;
     if (alpha != null) state._lastAlpha = alpha;
     if (compass != null) state._lastCompass = compass;
+    if (gamma != null) state.roll = gamma;
 
-    // LIVE tracking: prefer alpha+beta+gamma matrix (updates as you pan).
-    // iOS often freezes webkitCompassHeading — do NOT rely on it alone for motion.
-    let heading;
-    let pitch;
-    let source;
-
+    // LIVE yaw/pitch from matrix when alpha exists (relative or absolute).
+    // Absolute north via slow northBias from compass — not per-frame mix.
     if (alpha != null) {
       const aim = rearCameraAzAlt(alpha, b, g, state.screenAngle);
-      heading = aim.az;
-      pitch = aim.alt;
-      source = "matrix";
-
-      // Optional slow north correction from compass (doesn't freeze live motion)
-      if (compass != null && Math.abs(aim.alt) < 70) {
-        let c = compass;
-        if (state.screenAngle === 90) c = norm360(c + 90);
-        else if (state.screenAngle === -90 || state.screenAngle === 270)
-          c = norm360(c - 90);
-        else if (state.screenAngle === 180) c = norm360(c + 180);
-        // Blend 15% toward compass for absolute north, 85% live matrix
-        heading = norm360(heading + deltaAngle(heading, c) * 0.15);
-        source = "matrix+compass";
+      if (compass != null && Math.abs(aim.alt) < 65) {
+        maybeUpdateNorthBias(aim.az, compass);
       }
-    } else if (compass != null) {
-      // No alpha: iOS-style — compass for yaw, matrix pitch with last/0 alpha
-      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
-      heading = compass;
-      if (state.screenAngle === 90) heading = norm360(heading + 90);
-      else if (state.screenAngle === -90 || state.screenAngle === 270)
-        heading = norm360(heading - 90);
-      else if (state.screenAngle === 180) heading = norm360(heading + 180);
-      pitch = aim.alt;
-      source = "compass+tilt";
-    } else {
-      // Tilt only — still update pitch so vertical pan works
-      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
-      heading = state.headingRaw != null ? state.headingRaw : aim.az;
-      pitch = aim.alt;
-      source = "tilt-only";
+      applyAim(aim.az, aim.alt, compass != null ? "matrix" : "matrix");
+      return;
     }
 
-    if (gamma != null) state.roll = gamma;
-    applyAim(heading, pitch, source);
+    if (compass != null) {
+      // iOS often omits useful alpha: use compass for yaw + tilt for pitch
+      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+      applyAim(compassToLookAz(compass), aim.alt, "compass+tilt");
+      return;
+    }
+
+    // Tilt-only: still update pitch
+    const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+    const h = state.headingRaw != null ? state.headingRaw : aim.az;
+    applyAim(h, aim.alt, "tilt-only");
   }
 
-  /**
-   * Gyro: keep overlays moving when compass/orientation is sticky on iOS.
-   * rotationRate is deg/s in device frame.
-   */
   function onMotion(e) {
     const now = performance.now();
     const prev = state._lastMotionTs || now;
     let dt = (now - prev) / 1000;
     state._lastMotionTs = now;
     if (dt <= 0 || dt > 0.25) dt = 0.016;
+
+    // Gravity pitch backup when orientation is dead
+    const ag = e.accelerationIncludingGravity;
+    if (ag && (state.headingRaw == null || now - (state.lastAimMoveTs || 0) > 400)) {
+      const ax = ag.x || 0;
+      const ay = ag.y || 0;
+      const az = ag.z || 0;
+      // Rough camera elevation from gravity (portrait-ish)
+      const gpitch =
+        (Math.atan2(-az, Math.sqrt(ax * ax + ay * ay)) * 180) / Math.PI;
+      if (state.headingRaw != null) {
+        applyAim(state.headingRaw, gpitch, "gravity");
+      }
+    }
 
     const rr = e.rotationRate;
     if (!rr) return;
@@ -420,18 +444,16 @@
     const rb = typeof rr.beta === "number" && !Number.isNaN(rr.beta) ? rr.beta : 0;
     const rg = typeof rr.gamma === "number" && !Number.isNaN(rr.gamma) ? rr.gamma : 0;
     const gyroSpin = Math.abs(ra) + Math.abs(rb) + Math.abs(rg);
-    if (gyroSpin < 3) return; // idle noise
+    if (gyroSpin < 4) return;
 
-    const orientAge = now - (state.lastOrientTs || 0);
-    // If matrix orientation is healthy and recent, skip gyro (avoid double-count)
-    if (orientAge < 120 && state.orientSource === "matrix") return;
-    if (orientAge < 120 && state.orientSource === "matrix+compass") return;
+    // Rescue when aim values are flat even if orient events keep firing
+    const aimAge = now - (state.lastAimMoveTs || 0);
+    if (aimAge < 100 && gyroSpin < 25) return;
 
     let yawRate = 0;
     let pitchRate = 0;
     const ang = state.screenAngle || 0;
     if (ang === 0 || ang === 180) {
-      // Portrait viewfinder: turn left/right ~ alpha; tilt up/down ~ beta
       yawRate = -ra;
       pitchRate = -rb;
     } else if (ang === 90) {
@@ -445,27 +467,26 @@
       pitchRate = -rb;
     }
 
-    // Stronger when orientation is stale or compass-only
-    const gain =
-      orientAge > 250 ? 1.0 : state.orientSource === "compass+tilt" ? 0.85 : 0.5;
-
+    const gain = aimAge > 200 ? 1.15 : 0.7;
     const h0 = state.headingRaw != null ? state.headingRaw : 0;
     const p0 = state.pitchRaw != null ? state.pitchRaw : 30;
     applyAim(
       norm360(h0 + yawRate * dt * gain),
       Math.max(-89, Math.min(89, p0 + pitchRate * dt * gain)),
-      orientAge > 250 ? "gyro" : "gyro+orient"
+      "gyro"
     );
   }
 
   function startOrientation() {
-    if (state._orientStarted) return;
-    state._orientStarted = true;
+    if (state._listenersAttached) return;
+    state._listenersAttached = true;
     state.orientEventCount = 0;
     state.motionEventCount = 0;
+    state.northBias = state.northBias || 0;
 
-    const opts = { capture: true, passive: true };
+    const opts = { passive: true };
     window.addEventListener("deviceorientation", onOrientation, opts);
+    // Only use absolute if it actually fires with absolute:true (handler checks)
     window.addEventListener("deviceorientationabsolute", onOrientation, opts);
     window.addEventListener(
       "devicemotion",
@@ -480,16 +501,51 @@
       screen.orientation.addEventListener("change", updateScreenAngle);
     }
 
-    // Watchdog: warn if sensors never move overlays
     setTimeout(() => {
       if (!state.running) return;
-      if ((state.orientEventCount || 0) < 3 && (state.motionEventCount || 0) < 3) {
+      const moved = performance.now() - (state.lastAimMoveTs || 0) < 3000;
+      if ((state.orientEventCount || 0) < 2 && (state.motionEventCount || 0) < 2) {
         setStatus(
-          "Sensors quiet — allow Motion & Orientation; wave phone in a figure‑8",
+          "No sensors — Settings → Safari → Motion & Orientation ON, then restart",
           "warn"
         );
+      } else if (!moved && !state.orientReady) {
+        setStatus("Sensors idle — wave phone in a figure‑8", "warn");
+      } else if (state.orientReady) {
+        setStatus("Sensors live · " + (state.orientSource || ""), "ok");
       }
-    }, 2500);
+    }, 2800);
+  }
+
+  /**
+   * MUST be called synchronously inside the user tap (before any await).
+   * Returns a Promise for the permission results.
+   */
+  function beginSensorPermissionsInGesture() {
+    const tasks = [];
+    if (
+      typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function"
+    ) {
+      tasks.push(
+        DeviceOrientationEvent.requestPermission().catch((e) => {
+          throw e;
+        })
+      );
+    } else {
+      tasks.push(Promise.resolve("granted"));
+    }
+    if (
+      typeof DeviceMotionEvent !== "undefined" &&
+      typeof DeviceMotionEvent.requestPermission === "function"
+    ) {
+      tasks.push(
+        DeviceMotionEvent.requestPermission().catch(() => "denied")
+      );
+    } else {
+      tasks.push(Promise.resolve("granted"));
+    }
+    return Promise.all(tasks);
   }
 
   function applyGeo(pos) {
@@ -589,6 +645,15 @@
     }
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Camera API not available.");
+    }
+    // Stop previous stream so Restart works on iOS
+    if (state.stream) {
+      try {
+        state.stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+      state.stream = null;
+      state.videoTrack = null;
+      if (els.camera) els.camera.srcObject = null;
     }
     const tries = [
       {
@@ -790,7 +855,7 @@
           kind: "rasi",
           label: r.label,
           sub: r.en + " rāśi · ecliptic center",
-          color: "hsl(" + (i * 30) + " 70% 70%)",
+          color: "hsl(" + (i * 30) + ", 70%, 70%)",
           az: hor.azimuth,
           alt: hor.altitude,
           mag: null,
@@ -811,7 +876,7 @@
           kind: "nakshatra",
           label: name,
           sub: "Nakṣatra " + (i + 1) + " of 27",
-          color: "hsl(" + ((i * 13.3 + 180) % 360) + " 65% 72%)",
+          color: "hsl(" + Math.round((i * 13.3 + 180) % 360) + ", 65%, 72%)",
           az: hor.azimuth,
           alt: hor.altitude,
           mag: null,
@@ -821,6 +886,7 @@
       } catch (_) {}
     });
 
+    // Always include ISS row so the layer is never empty
     if (state.iss) {
       out.push({
         id: "iss",
@@ -837,6 +903,17 @@
         alt: state.iss.alt,
         mag: state.iss.alt > 10 ? -1.5 : 0,
         rangeKm: state.iss.rangeKm,
+      });
+    } else {
+      out.push({
+        id: "iss",
+        kind: "iss",
+        label: "ISS",
+        sub: state.issError ? "Feed error · retry" : "Loading live position…",
+        color: "#6dffa8",
+        az: state.heading != null ? state.heading : 0,
+        alt: -90,
+        mag: null,
       });
     }
 
@@ -922,6 +999,7 @@
   }
 
   function resizeCanvas() {
+    if (!els.canvas || !ctx) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const { w, h } = cssSize();
     els.canvas.width = Math.round(w * dpr);
@@ -934,8 +1012,20 @@
   // ── Draw ─────────────────────────────────────────────────────────────
 
   function draw() {
+    if (!ctx) return;
     const { w, h } = cssSize();
     ctx.clearRect(0, 0, w, h);
+
+    // Sensor dead → tell user overlays cannot track
+    if (!state.orientReady) {
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(w * 0.1, h * 0.42, w * 0.8, 48);
+      ctx.fillStyle = "#ffd27a";
+      ctx.font = "700 14px -apple-system, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Waiting for motion sensors… pan after Allow", w / 2, h * 0.42 + 30);
+      ctx.textAlign = "start";
+    }
 
     // Ecliptic guide for zodiac / nakṣatra layers
     if (state.activeLayer === "rasi" || state.activeLayer === "nakshatra") {
@@ -973,10 +1063,16 @@
 
       if (!drawIt) continue;
 
-      // True projected position; soft-edge only if off the usable frame
-      const clamped = clampToFrame(p.x, p.y, w, h, 24);
-      const px = clamped.x;
-      const py = clamped.y;
+      // Only clamp the selected guide target — other markers must stay honest on-sky
+      let px = p.x;
+      let py = p.y;
+      if (isTarget && !p.inFov) {
+        const clamped = clampToFrame(p.x, p.y, w, h, 24);
+        px = clamped.x;
+        py = clamped.y;
+      } else if (!p.inFov && p.angDist > 50) {
+        continue; // don't pin the whole sky to the frame edge
+      }
 
       let r = 7;
       if (obj.kind === "iss") r = 11;
@@ -1634,23 +1730,30 @@
 
   function tick(ts) {
     if (!state.running) return;
-    if (ts - state.lastBodyCompute > 500) {
-      computeSky();
-      state.lastBodyCompute = ts;
+    try {
+      if (ts - state.lastBodyCompute > 500) {
+        computeSky();
+        state.lastBodyCompute = ts;
+      }
+      if (ts - state.lastIssFetch > 4000) {
+        refreshISS(false);
+      }
+      if (ctx) draw();
+    } catch (err) {
+      console.error("tick", err);
+      setStatus("Draw error: " + ((err && err.message) || err), "warn");
     }
-    if (ts - state.lastIssFetch > 4000) {
-      refreshISS(false);
-    }
-    draw();
+    // Always re-schedule even if draw throws — otherwise AR dies forever
     requestAnimationFrame(tick);
   }
 
   async function startAll() {
-    // Prevent double-taps
     if (state._starting) return;
     state._starting = true;
+    state.running = false; // stop prior rAF ownership until we restart
 
     showGateError("");
+    if (els.gate) els.gate.classList.remove("hidden");
     if (els.btnGateStart) {
       els.btnGateStart.disabled = true;
       els.btnGateStart.textContent = "Starting…";
@@ -1660,78 +1763,81 @@
 
     const notes = [];
 
+    // CRITICAL iOS: fire requestPermission() in this click turn BEFORE any await
+    let sensorPermPromise = null;
     try {
+      sensorPermPromise = beginSensorPermissionsInGesture();
+    } catch (err) {
+      notes.push("Motion prompt: " + ((err && err.message) || err));
+      sensorPermPromise = Promise.resolve(["denied", "denied"]);
+    }
+
+    try {
+      if (!window.isSecureContext) {
+        throw new Error("Need HTTPS (open the github.io link in Safari).");
+      }
       if (typeof Astronomy === "undefined") {
-        throw new Error(
-          "Astronomy library failed to load. Check network, then reload the page."
-        );
+        throw new Error("Astronomy library failed to load. Check network, reload.");
       }
       if (!X()) {
-        throw new Error(
-          "Sky extras failed to load. Hard-refresh the page (close tab and reopen)."
-        );
+        throw new Error("Sky extras failed to load. Hard-refresh (close tab).");
       }
+      if (!ctx) throw new Error("Canvas missing.");
 
-      // 1) CAMERA FIRST — iOS requires getUserMedia close to the user tap.
-      //    Requesting GPS/motion before camera often hangs Safari forever.
+      // Camera still needs to be early for getUserMedia UX
       setStatus("Camera…", "warn");
       showGateError("Requesting camera…");
       await withTimeout(startCamera(), 20000, "Camera");
 
-      // 2) Motion / compass (optional if user denies)
-      setStatus("Motion / compass…", "warn");
-      showGateError("Requesting motion…");
+      // Await motion permissions started in the gesture
+      setStatus("Motion…", "warn");
+      showGateError("Waiting for motion permission…");
       try {
-        await requestOrientationPermission();
-        startOrientation();
+        const perms = await withTimeout(sensorPermPromise, 45000, "Motion permission");
+        const o = perms && perms[0];
+        if (o && o !== "granted") {
+          notes.push("Motion denied");
+        }
       } catch (err) {
-        startOrientation(); // still listen if events exist without prompt
-        notes.push("Compass: " + (err.message || "not granted"));
+        notes.push("Motion: " + ((err && err.message) || "timeout"));
       }
+      startOrientation();
 
-      // 3) Location (optional fallback)
       setStatus("Location…", "warn");
       showGateError("Requesting location…");
       try {
         await withTimeout(getLocation(), 15000, "Location");
       } catch (err) {
-        notes.push("GPS: " + (err.message || "failed"));
+        notes.push("GPS: " + ((err && err.message) || "failed"));
         await getLocationFallback();
       }
 
-      // 4) ISS — never block UI
       refreshISS(true).catch(() => {});
-
       computeSky();
       buildObjectList();
       state.running = true;
       els.gate.classList.add("hidden");
 
-      // Default aim so UI is usable before compass wakes
-      if (state.heading == null) {
-        state.heading = 0;
-        state.pitch = 35;
-      }
-
+      // Do NOT invent heading/pitch — project() returns null until sensors live
       setStatus(
         notes.length
-          ? "Live (partial) · " + notes.join(" · ")
-          : "Live · Layers · Find",
+          ? "Live (partial) · " + notes.join(" · ") + " · pan phone"
+          : "Live · pan phone · open Layers",
         notes.length ? "warn" : "ok"
       );
-      // Show find list once so overlays + list are obvious
       setFindOpen(true);
       syncGuidingUi();
       requestAnimationFrame(tick);
     } catch (err) {
       console.error(err);
       const msg = err && err.message ? err.message : String(err);
+      if (els.gate) els.gate.classList.remove("hidden");
       showGateError(
         msg +
-          "\n\nTips: use Safari · Settings → Safari → Camera/Location/Motion Allow · " +
-          "Precise Location On · reload page · try again."
+          "\n\nSafari · Camera/Location/Motion Allow · Precise Location On · reload."
       );
       setStatus("Start failed", "warn");
+      state.running = false;
     } finally {
       state._starting = false;
       if (els.btnGateStart) {
@@ -1815,13 +1921,17 @@
       buildObjectList();
     });
 
-    // Tap empty sky (canvas) to re-open controls when guiding
-    els.canvas?.addEventListener("click", () => {
-      if (state.targetId) {
-        // brief reveal of map controls
-        els.mapControls?.classList.add("force-show");
-        setTimeout(() => els.mapControls?.classList.remove("force-show"), 2500);
-      }
+    // Tap app (not canvas — pointer-events none) to re-show FABs while guiding
+    document.getElementById("app")?.addEventListener("click", (ev) => {
+      if (!state.targetId) return;
+      if (ev.target && ev.target.closest && ev.target.closest("button, a, input, .map-panel, .find-panel"))
+        return;
+      els.mapControls?.classList.add("force-show");
+      setTimeout(() => els.mapControls?.classList.remove("force-show"), 2500);
+    });
+
+    window.visualViewport?.addEventListener("resize", () => {
+      resizeCanvas();
     });
 
     updateLayerChrome();
