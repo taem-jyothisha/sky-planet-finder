@@ -642,11 +642,86 @@ body.guiding .map-controls.force-show {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.obj-card .detail {
+  font-size: 0.58rem;
+  color: #9aa8c7;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .obj-card .meta {
   font-size: 0.66rem;
   color: var(--accent);
   font-weight: 650;
 }
+.role-badge {
+  margin-left: auto;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.role-badge.role-bright,
+.role-badge.role-visible {
+  background: rgba(109, 255, 168, 0.2);
+  color: #6dffa8;
+}
+.role-badge.role-node {
+  background: rgba(176, 160, 255, 0.25);
+  color: #c8b8ff;
+}
+.role-badge.role-set,
+.role-badge.role-day {
+  background: rgba(255,255,255,0.06);
+  color: #888;
+}
+.obj-card.kind-graha {
+  /* full width for jyotish detail when few columns feel cramped */
+}
+@media (max-width: 420px) {
+  .object-grid.graha-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.tonight-strip {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.15rem 0 0.35rem;
+  -webkit-overflow-scrolling: touch;
+}
+.tonight-chip {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 255, 168, 0.35);
+  background: rgba(109, 255, 168, 0.1);
+  color: #b8ffd4;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ac-box {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.55rem;
+  border-radius: 0.65rem;
+  background: #f4f7fb;
+  border: 1px solid #e2e8f0;
+  font-size: 0.65rem;
+  color: #334;
+  line-height: 1.4;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+.ac-box strong { color: #111; }
 .obj-card.below { opacity: 0.45; }
 .obj-card.selected {
   border-color: var(--accent-2);

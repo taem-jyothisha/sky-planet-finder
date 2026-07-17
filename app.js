@@ -65,6 +65,7 @@
     layerHint: $("layerHint"),
     listMeta: $("listMeta"),
     onlyAbove: $("onlyAbove"),
+    tonightStrip: $("tonightStrip"),
   };
 
   if (!els.canvas) {
@@ -828,23 +829,73 @@
             else mag = Astronomy.Illumination(g.body, time).mag;
           } catch (_) {}
         }
+        const rasi = Ex.rasiName(sidLon);
+        const nak = Ex.nakshatraName(sidLon);
+        const pada = Ex.nakshatraPada(sidLon);
+        const degR = Ex.degreeInRasi(sidLon);
+        const role = Ex.grahaSkyRole(g, alt, mag);
+        let moonExtra = null;
+        if (g.body === "Moon") moonExtra = Ex.moonPhaseInfo(time);
+        if (moonExtra && moonExtra.mag != null) mag = moonExtra.mag;
+
+        const degStr = degR.toFixed(1) + "°";
         out.push({
           id: "graha:" + g.id,
           kind: "graha",
+          grahaId: g.id,
           label: g.label,
-          sub: g.en + " · " + Ex.rasiName(sidLon) + " · " + Ex.nakshatraName(sidLon),
+          en: g.en,
+          sub:
+            rasi +
+            " " +
+            degStr +
+            " · " +
+            nak +
+            " pāda " +
+            pada +
+            (role.badge ? " · " + role.badge : ""),
+          detail:
+            (moonExtra
+              ? moonExtra.shape + " · " + moonExtra.paksha + " pakṣa · "
+              : "") +
+            role.note +
+            " · Raman",
           color: g.color,
           az,
           alt,
           mag,
           sidLon,
           tropLon,
-          rasi: Ex.rasiName(sidLon),
-          nakshatra: Ex.nakshatraName(sidLon),
+          rasi,
+          nakshatra: nak,
+          pada,
+          degInRasi: degR,
+          skyRole: role,
+          isNode: !!(g.node || g.id === "Rahu" || g.id === "Ketu"),
+          moon: moonExtra,
         });
       } catch (err) {
         console.warn("graha", g.id, err);
       }
+    }
+
+    // Rising ecliptic ≈ sky lagna direction (for recognition of “east / rising rāśi”)
+    try {
+      const rise = Ex.findRisingEcliptic(time, observer);
+      if (rise) {
+        const sid = Ex.tropicalToSidereal(rise.tropLon, time);
+        state.skyLagna = {
+          az: rise.az,
+          alt: rise.alt,
+          tropLon: rise.tropLon,
+          sidLon: sid,
+          rasi: Ex.rasiName(sid),
+          nakshatra: Ex.nakshatraName(sid),
+          pada: Ex.nakshatraPada(sid),
+        };
+      } else state.skyLagna = null;
+    } catch (_) {
+      state.skyLagna = null;
     }
 
     Ex.RASIS.forEach((r, i) => {
@@ -1036,6 +1087,46 @@
     let nearest = null;
     let nearestPointlike = null;
 
+    // Lagna / udaya marker (eastern ecliptic rise)
+    if (state.skyLagna && state.orientReady) {
+      const lp = project({
+        az: state.skyLagna.az,
+        alt: Math.max(state.skyLagna.alt, 0.5),
+      });
+      if (lp && (lp.inFov || lp.angDist < 70)) {
+        let x = lp.x;
+        let y = lp.y;
+        if (!lp.inFov) {
+          const c = clampToFrame(lp.x, lp.y, w, h, 20);
+          x = c.x;
+          y = c.y;
+        }
+        ctx.save();
+        ctx.strokeStyle = "rgba(109, 255, 168, 0.85)";
+        ctx.fillStyle = "rgba(109, 255, 168, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 16);
+        ctx.lineTo(x, y + 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y - 16);
+        ctx.lineTo(x - 6, y - 6);
+        ctx.lineTo(x + 6, y - 6);
+        ctx.closePath();
+        ctx.fill();
+        const lab = "Udaya · " + state.skyLagna.rasi;
+        ctx.font = "700 11px -apple-system, system-ui, sans-serif";
+        const tw = ctx.measureText(lab).width;
+        ctx.fillStyle = "rgba(0,0,0,0.65)";
+        roundRect(ctx, x - tw / 2 - 4, y + 12, tw + 8, 16, 5);
+        ctx.fill();
+        ctx.fillStyle = "#6dffa8";
+        ctx.fillText(lab, x - tw / 2, y + 24);
+        ctx.restore();
+      }
+    }
+
     // Point markers: all 9 grahas when overlay on + ISS + selected target
     const points = state.objects.filter((o) => {
       if (o.id === state.targetId) return true;
@@ -1105,20 +1196,43 @@
         ctx.stroke();
       }
 
+      // Node grahas: ring not filled disc (jyotishi: not a light)
+      if (obj.isNode) {
+        ctx.beginPath();
+        ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = obj.color;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+
+      const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
       const label =
         obj.label +
         (obj.alt < 0 ? " ↓" : "") +
-        (obj.rasi ? " · " + obj.rasi : "");
-      ctx.font = "700 13px -apple-system, system-ui, sans-serif";
-      const tw = ctx.measureText(label).width;
+        (obj.rasi ? " · " + obj.rasi : "") +
+        (obj.nakshatra ? " · " + obj.nakshatra : "");
+      const line2 =
+        (obj.pada ? "pāda " + obj.pada + " · " : "") +
+        (badge ? badge + " · " : "") +
+        (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
+      ctx.font = "700 12px -apple-system, system-ui, sans-serif";
+      const tw = Math.max(
+        ctx.measureText(label).width,
+        line2 ? ctx.measureText(line2).width : 0
+      );
       const lx = px - tw / 2;
-      const ly = py - r - 14;
+      const ly = py - r - (line2 ? 28 : 14);
       ctx.globalAlpha = Math.min(1, alpha + 0.2);
-      ctx.fillStyle = "rgba(0,0,0,0.7)";
-      roundRect(ctx, lx - 6, ly - 12, tw + 12, 20, 8);
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      roundRect(ctx, lx - 6, ly - 12, tw + 12, line2 ? 32 : 20, 8);
       ctx.fill();
       ctx.fillStyle = "#fff";
       ctx.fillText(label, lx, ly + 2);
+      if (line2) {
+        ctx.font = "600 10px -apple-system, system-ui, sans-serif";
+        ctx.fillStyle = "rgba(255,210,122,0.95)";
+        ctx.fillText(line2, lx, ly + 15);
+      }
 
       if (isTarget) {
         ctx.beginPath();
@@ -1355,39 +1469,107 @@
     c.closePath();
   }
 
+  /**
+   * Jyotishi “what am I looking at?” under the crosshair.
+   * AC: given aim, show graha and/or rāśi + nakṣatra of that sky direction.
+   */
+  function skyContextAtAim() {
+    if (state.heading == null || state.pitch == null || !X() || state.lat == null)
+      return null;
+    if (typeof Astronomy === "undefined") return null;
+    // Approximate: map aim alt/az back is hard; use nearest ecliptic sample in FOV cone
+    const Ex = X();
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    let best = null;
+    for (let sid = 0; sid < 360; sid += 2) {
+      try {
+        const trop = Ex.siderealToTropical(sid, time);
+        const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
+        const dAz = deltaAngle(state.heading, hor.azimuth);
+        const dAlt = hor.altitude - state.pitch;
+        const dist = Math.hypot(dAz, dAlt);
+        if (!best || dist < best.dist) {
+          best = {
+            dist,
+            sidLon: sid,
+            rasi: Ex.rasiName(sid),
+            nak: Ex.nakshatraName(sid),
+            pada: Ex.nakshatraPada(sid),
+            deg: Ex.degreeInRasi(sid),
+          };
+        }
+      } catch (_) {}
+    }
+    if (!best || best.dist > 18) return null;
+    return best;
+  }
+
   function updateHud(nearest) {
     if (state.heading == null || state.pitch == null) {
-      els.pointingMain.textContent = "Aim phone at sky";
-      els.pointingSub.textContent = state.orientReady
-        ? "Wave phone in a figure‑8 for compass"
-        : "Allow Motion";
+      if (els.pointingMain) els.pointingMain.textContent = "Aim phone at sky";
+      if (els.pointingSub)
+        els.pointingSub.textContent = state.orientReady
+          ? "Wave phone in a figure‑8 · then Align on Candra"
+          : "Allow Motion · then pan";
       return;
     }
     const thr = lookAtThreshold();
     const dir = compassLabel(state.heading);
-    if (nearest && nearest.angDist < thr && nearest.obj.alt > -1) {
+    const ctxSky = skyContextAtAim();
+    const lag = state.skyLagna;
+
+    if (nearest && nearest.angDist < thr && nearest.obj) {
       const o = nearest.obj;
-      els.pointingMain.textContent = o.label;
-      els.pointingSub.textContent =
-        (o.sub || o.kind) +
-        " · " +
-        nearest.angDist.toFixed(1) +
-        "° off center · " +
-        dir;
-    } else {
+      if (els.pointingMain) {
+        els.pointingMain.textContent =
+          o.label +
+          (o.skyRole && o.skyRole.badge ? " · " + o.skyRole.badge : "");
+      }
+      if (els.pointingSub) {
+        els.pointingSub.textContent =
+          (o.rasi || "") +
+          (o.degInRasi != null ? " " + o.degInRasi.toFixed(1) + "°" : "") +
+          (o.nakshatra ? " · " + o.nakshatra : "") +
+          (o.pada ? " p" + o.pada : "") +
+          " · " +
+          nearest.angDist.toFixed(1) +
+          "° · " +
+          dir;
+      }
+      return;
+    }
+
+    if (ctxSky) {
+      if (els.pointingMain)
+        els.pointingMain.textContent =
+          ctxSky.rasi + " · " + ctxSky.nak + " p" + ctxSky.pada;
+      if (els.pointingSub)
+        els.pointingSub.textContent =
+          "Belt under crosshair · " +
+          ctxSky.deg.toFixed(1) +
+          "° in rāśi · " +
+          dir +
+          " " +
+          state.pitch.toFixed(0) +
+          "°" +
+          (lag ? " · udaya ≈ " + lag.rasi : "");
+      return;
+    }
+
+    if (els.pointingMain)
       els.pointingMain.textContent =
         dir + " · " + state.pitch.toFixed(0) + "° elev";
+    if (els.pointingSub)
       els.pointingSub.textContent =
-        nearest && nearest.obj.alt > 0
-          ? "Nearest: " +
+        (nearest && nearest.obj
+          ? "Nearest " +
             nearest.obj.label +
-            " (" +
-            nearest.obj.kind +
-            ") " +
+            " " +
             nearest.angDist.toFixed(0) +
-            "° off"
-          : "No object near crosshair";
-    }
+            "° · "
+          : "") +
+        (lag ? "Udaya rāśi ≈ " + lag.rasi : "Open Layers · Align on Moon");
   }
 
   function setEdge(el, on, label) {
@@ -1691,19 +1873,75 @@
     });
   }
 
+  function renderTonightStrip() {
+    if (!els.tonightStrip) return;
+    els.tonightStrip.innerHTML = "";
+    if (state.activeLayer !== "graha") {
+      els.tonightStrip.hidden = true;
+      return;
+    }
+    els.tonightStrip.hidden = false;
+    const bright = state.objects.filter(
+      (o) =>
+        o.kind === "graha" &&
+        o.skyRole &&
+        (o.skyRole.code === "bright" || o.skyRole.code === "visible") &&
+        o.alt > 5
+    );
+    if (!bright.length) {
+      const tip = document.createElement("span");
+      tip.className = "tonight-chip";
+      tip.textContent = "No bright graha up · check belt / later";
+      tip.style.borderStyle = "dashed";
+      els.tonightStrip.appendChild(tip);
+      return;
+    }
+    const lab = document.createElement("span");
+    lab.className = "tonight-chip";
+    lab.style.borderColor = "rgba(255,210,122,0.4)";
+    lab.style.color = "#ffd27a";
+    lab.textContent = "Tonight (naked-eye)";
+    els.tonightStrip.appendChild(lab);
+    for (const o of bright) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tonight-chip";
+      b.textContent =
+        o.label + (o.rasi ? " · " + o.rasi : "") + " · " + o.alt.toFixed(0) + "°";
+      b.addEventListener("click", () => {
+        state.targetId = o.id;
+        state.overlays.graha = true;
+        updateGuide();
+        syncGuidingUi();
+        buildObjectList();
+      });
+      els.tonightStrip.appendChild(b);
+    }
+  }
+
   function buildObjectList(items) {
     if (!els.objectList) return;
     if (!items) items = objectsForActiveLayer();
     updateLayerChrome();
+    renderTonightStrip();
 
     const aboveN = items.filter((o) => o.alt >= 0).length;
     if (els.listMeta) {
-      els.listMeta.textContent =
-        items.length
+      if (state.activeLayer === "graha") {
+        els.listMeta.textContent =
+          "All 9 · " +
+          aboveN +
+          " above horizon · Raman · badges = sky recognition";
+      } else {
+        els.listMeta.textContent = items.length
           ? aboveN + " up · " + items.length + " listed · tap to guide"
           : "Nothing to show";
+      }
     }
 
+    els.objectList.className =
+      "object-grid" +
+      (state.activeLayer === "graha" ? " graha-grid" : "");
     els.objectList.innerHTML = "";
     for (const obj of items) {
       const btn = document.createElement("button");
@@ -1711,13 +1949,26 @@
       btn.className = "obj-card kind-" + obj.kind;
       btn.dataset.id = obj.id;
       btn.setAttribute("role", "option");
+      const roleBadge =
+        obj.skyRole && obj.skyRole.badge
+          ? '<span class="role-badge role-' +
+            (obj.skyRole.code || "") +
+            '">' +
+            obj.skyRole.badge +
+            "</span>"
+          : "";
       btn.innerHTML =
         '<span class="name"><span class="dot" style="background:' +
         obj.color +
         '"></span><span class="name-text">' +
         obj.label +
-        '</span></span>' +
+        "</span>" +
+        roleBadge +
+        "</span>" +
         (obj.sub ? '<span class="sub">' + obj.sub + "</span>" : "") +
+        (obj.detail
+          ? '<span class="detail">' + obj.detail + "</span>"
+          : "") +
         '<span class="meta">—</span>';
       btn.addEventListener("click", () => {
         state.targetId = state.targetId === obj.id ? null : obj.id;

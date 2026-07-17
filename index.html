@@ -124,6 +124,15 @@
         <input type="checkbox" id="onlyAbove" />
         List: only above horizon (grahas always show all 9)
       </label>
+      <div class="ac-box" id="acBox">
+        <strong>Jyotishi acceptance (Raman)</strong><br />
+        • All 9 grahas listed with rāśi · nakṣatra · pāda<br />
+        • Bright / Visible / Chāyā / Set badges for night recognition<br />
+        • Zodiac + nakṣatra belts on camera for structure<br />
+        • Crosshair shows graha or belt rāśi·nakṣatra under aim<br />
+        • Udaya marker ≈ rising rāśi direction<br />
+        • Align on Candra once so AR matches the real sky
+      </div>
     </div>
 
     <!-- Find panel: object list for active layer (slides up, not full screen) -->
@@ -140,6 +149,7 @@
         </div>
       </div>
       <p id="listMeta" class="list-meta">—</p>
+      <div id="tonightStrip" class="tonight-strip" aria-label="Tonight naked-eye"></div>
       <div id="objectList" class="object-grid" role="listbox" aria-label="Objects"></div>
     </div>
 
@@ -188,7 +198,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="astro-extras.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

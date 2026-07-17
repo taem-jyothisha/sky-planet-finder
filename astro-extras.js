@@ -101,6 +101,139 @@
     return RASIS[rasiIndex(sidLon)].label;
   }
 
+  /** Degree within rāśi 0–30 */
+  function degreeInRasi(sidLon) {
+    return norm360(sidLon) % 30;
+  }
+
+  /** Nakṣatra pāda 1–4 */
+  function nakshatraPada(sidLon) {
+    const width = 360 / 27;
+    const within = norm360(sidLon) % width;
+    return Math.min(4, Math.floor(within / (width / 4)) + 1);
+  }
+
+  /**
+   * Jyotishi sky-recognition metadata for a graha.
+   * Helps answer: “Can I actually see this tonight?”
+   */
+  function grahaSkyRole(g, alt, mag) {
+    if (g.node === "rahu" || g.node === "ketu" || g.id === "Rahu" || g.id === "Ketu") {
+      return {
+        code: "node",
+        nakedEye: false,
+        badge: "Chāyā",
+        note: "Mathematical node · not a light in the sky · aim by belt + Align",
+      };
+    }
+    if (g.body === "Sun" || g.id === "Sun") {
+      return {
+        code: "day",
+        nakedEye: false,
+        badge: "Sūrya",
+        note: "Daytime body · not for night recognition",
+      };
+    }
+    if (alt < -2) {
+      return {
+        code: "set",
+        nakedEye: false,
+        badge: "Set",
+        note: "Below horizon now · note rise az for later",
+      };
+    }
+    if (alt >= -2 && alt < 8) {
+      return {
+        code: "horizon",
+        nakedEye: mag != null ? mag <= 2.5 : true,
+        badge: "Rise/Set",
+        note: "Near horizon · atmosphere · best after Align",
+      };
+    }
+    // Naked-eye planets roughly mag ≤ ~6; practical bright cut ~2.5 for cities
+    if (mag != null && mag <= 1.5) {
+      return {
+        code: "bright",
+        nakedEye: true,
+        badge: "Bright",
+        note: "Strong naked-eye candidate · match color + ecliptic",
+      };
+    }
+    if (mag != null && mag <= 4.5) {
+      return {
+        code: "visible",
+        nakedEye: true,
+        badge: "Visible",
+        note: "Likely naked-eye in dark/clear sky",
+      };
+    }
+    if (mag != null && mag > 4.5) {
+      return {
+        code: "faint",
+        nakedEye: false,
+        badge: "Faint",
+        note: "Hard naked-eye · binoculars / trust AR after Align",
+      };
+    }
+    return {
+      code: "ok",
+      nakedEye: alt > 10,
+      badge: "Up",
+      note: "Above horizon · confirm with belt + Align",
+    };
+  }
+
+  /** Moon phase 0–1 (0/1 new, 0.5 full) + pakṣa label */
+  function moonPhaseInfo(time) {
+    try {
+      const phase = Astronomy.MoonPhase(time); // 0–360 elongation-ish in some versions
+      // astronomy-engine MoonPhase returns degrees 0–360 (illumination cycle)
+      const deg = typeof phase === "number" ? phase : 0;
+      const illum = Astronomy.Illumination("Moon", time);
+      const frac = illum && illum.phase_fraction != null ? illum.phase_fraction : null;
+      let paksha = "—";
+      if (deg < 180) paksha = "Śukla";
+      else paksha = "Kṛṣṇa";
+      let shape = "Moon";
+      if (frac != null) {
+        if (frac < 0.05) shape = "Amāvasyā / thin";
+        else if (frac < 0.35) shape = "Crescent";
+        else if (frac < 0.65) shape = "Half / gibbous";
+        else if (frac < 0.95) shape = "Gibbous / near pūrṇimā";
+        else shape = "Pūrṇimā / full";
+      }
+      return { deg, frac, paksha, shape, mag: illum ? illum.mag : null };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Rising ecliptic point ≈ Lagna direction on the sky:
+   * ecliptic altitude ~0°, azimuth in eastern semicircle (rising).
+   */
+  function findRisingEcliptic(time, observer) {
+    let best = null;
+    for (let lon = 0; lon < 360; lon += 0.5) {
+      try {
+        const hor = eclipticToHorizon(lon, 0, time, observer);
+        // East ≈ 90°; rising half roughly az 0–180 depending on lat — use 20–160
+        if (hor.azimuth < 15 || hor.azimuth > 165) continue;
+        const score = Math.abs(hor.altitude) + (hor.azimuth < 40 || hor.azimuth > 140 ? 0.5 : 0);
+        if (Math.abs(hor.altitude) > 2.5) continue;
+        if (!best || score < best.score) {
+          best = {
+            tropLon: lon,
+            az: hor.azimuth,
+            alt: hor.altitude,
+            score,
+          };
+        }
+      } catch (_) {}
+    }
+    return best;
+  }
+
   /** Mean lunar ascending node (tropical ecliptic longitude), Meeus */
   function meanAscendingNode(time) {
     const T = time.tt / 36525.0;
@@ -235,6 +368,11 @@
     nakshatraName,
     rasiIndex,
     rasiName,
+    degreeInRasi,
+    nakshatraPada,
+    grahaSkyRole,
+    moonPhaseInfo,
+    findRisingEcliptic,
     meanAscendingNode,
     eclipticToHorizon,
     tropicalEclipticLon,
