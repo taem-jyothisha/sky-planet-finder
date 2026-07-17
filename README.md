@@ -2,6 +2,14 @@
 
 Simple web app: point your phone at the sky, see which planet you’re looking at, and follow on-screen arrows to a planet you pick.
 
+## Live on iPhone (free HTTPS)
+
+**https://taem-jyothisha.github.io/sky-planet-finder/**
+
+Open in **Safari** → Allow & start → Share → Add to Home Screen (optional).
+
+Repo: https://github.com/taem-jyothisha/sky-planet-finder
+
 ## Features
 
 1. **Live camera** (rear) with sky overlay  
