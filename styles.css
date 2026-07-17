@@ -42,6 +42,7 @@ html, body {
   background: #000;
   transform: scale(1);
   transform-origin: center center;
+  transition: transform 0.08s linear;
 }
 
 #skyCanvas {
@@ -117,9 +118,6 @@ html, body {
   color: var(--accent-2);
   min-width: 4.5rem;
   white-space: nowrap;
-}
-#camera {
-  transition: transform 0.08s linear;
 }
 .head-actions { display: flex; gap: 0.35rem; align-items: center; }
 .debug-line {
