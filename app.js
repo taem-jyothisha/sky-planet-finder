@@ -6,8 +6,8 @@
   "use strict";
 
   const X = () => window.SkyExtras;
-  const BASE_H_FOV = 62;
-  const BASE_V_FOV = 46;
+  // iPhone main (~24mm) horizontal FOV ≈ 60–65° on full uncropped frame at 1×
+  const BASE_H_FOV_1X = 60;
 
   const $ = (id) => document.getElementById(id);
 
@@ -25,12 +25,18 @@
     objectList: $("objectList"),
     pointingMain: $("pointingMain"),
     pointingSub: $("pointingSub"),
-    guideArrow: $("guideArrow"),
-    guideText: $("guideText"),
-    guideMeta: $("guideMeta"),
+    guidePanel: $("guidePanel"),
+    guidePrimary: $("guidePrimary"),
+    guideSecondary: $("guideSecondary"),
+    guideDelta: $("guideDelta"),
+    edgeLeft: $("edgeLeft"),
+    edgeRight: $("edgeRight"),
+    edgeUp: $("edgeUp"),
+    edgeDown: $("edgeDown"),
     lockedBadge: $("lockedBadge"),
     lockedName: $("lockedName"),
     lockedDetail: $("lockedDetail"),
+    alignBanner: $("alignBanner"),
     headingOffset: $("headingOffset"),
     headingOffsetVal: $("headingOffsetVal"),
     pitchOffset: $("pitchOffset"),
@@ -133,9 +139,89 @@
     return prev + (next - prev) * alpha;
   }
 
+  /**
+   * Effective FOV of what's visible on screen after object-fit:cover + zoom.
+   * Critical for AR alignment — wrong FOV = labels slide off the real sky.
+   */
   function viewFov() {
     const z = Math.max(0.5, state.zoom || 1);
-    return { h: BASE_H_FOV / z, v: BASE_V_FOV / z };
+    const vid = els.camera;
+    const vw = vid.videoWidth || 1920;
+    const vh = vid.videoHeight || 1080;
+    const { w: sw, h: sh } = cssSize();
+    const videoAspect = vw / Math.max(1, vh);
+    const screenAspect = sw / Math.max(1, sh);
+
+    // Full-frame camera FOV at this zoom (uncropped stream)
+    const fullH = BASE_H_FOV_1X / z;
+    const fullV =
+      ((2 * Math.atan(Math.tan(((fullH / 2) * Math.PI) / 180) / videoAspect)) *
+        180) /
+      Math.PI;
+
+    // object-fit: cover — only a center crop of the video is visible
+    let visibleHFrac = 1;
+    let visibleVFrac = 1;
+    if (videoAspect > screenAspect) {
+      // sides cropped
+      visibleHFrac = screenAspect / videoAspect;
+      visibleVFrac = 1;
+    } else {
+      // top/bottom cropped
+      visibleHFrac = 1;
+      visibleVFrac = videoAspect / screenAspect;
+    }
+
+    return {
+      h: fullH * visibleHFrac,
+      v: fullV * visibleVFrac,
+      fullH,
+      fullV,
+      videoAspect,
+      screenAspect,
+    };
+  }
+
+  /**
+   * Rear-camera azimuth (0=N, CW) + altitude (0=horizon, +up) from DeviceOrientation.
+   * Device frame: X right, Y top-of-screen, Z out of screen toward user.
+   * Rear camera looks along −Z. Formula from W3C/Opera deviceorientation compass notes.
+   */
+  function rearCameraAzAlt(alpha, beta, gamma, screenOrientDeg) {
+    const a = (((alpha || 0) % 360) * Math.PI) / 180;
+    const b = ((beta || 0) * Math.PI) / 180;
+    const g = ((gamma || 0) * Math.PI) / 180;
+
+    const cA = Math.cos(a);
+    const sA = Math.sin(a);
+    const cB = Math.cos(b);
+    const sB = Math.sin(b);
+    const cG = Math.cos(g);
+    const sG = Math.sin(g);
+
+    // World components of the "out the back of the device" vector
+    let rA = -cA * sG - sA * sB * cG;
+    let rB = -sA * sG + cA * sB * cG;
+    let rC = -cB * cG;
+
+    // Screen orientation (portrait/landscape) rotation around device Z
+    const o = ((screenOrientDeg || 0) * Math.PI) / 180;
+    const cO = Math.cos(o);
+    const sO = Math.sin(o);
+    const east = rA * cO - rB * sO;
+    const north = rA * sO + rB * cO;
+    const up = rC;
+
+    // Azimuth: atan2(east, north) → 0° north, clockwise positive
+    let az = (Math.atan2(east, north) * 180) / Math.PI;
+    if (az < 0) az += 360;
+
+    // Altitude: elevation of look vector above horizon
+    const horiz = Math.sqrt(east * east + north * north);
+    let alt = (Math.atan2(up, horiz) * 180) / Math.PI;
+    alt = Math.max(-89, Math.min(89, alt));
+
+    return { az, alt, east, north, up };
   }
 
   function lookAtThreshold() {
@@ -211,51 +297,58 @@
     const beta = typeof e.beta === "number" ? e.beta : null;
     const gamma = typeof e.gamma === "number" ? e.gamma : null;
     const alpha = typeof e.alpha === "number" ? e.alpha : null;
+    if (beta == null || gamma == null) return;
 
-    let heading = null;
-    if (typeof e.webkitCompassHeading === "number" && !Number.isNaN(e.webkitCompassHeading)) {
+    // Absolute heading: prefer iOS webkitCompassHeading when present (true-ish north).
+    // Pitch / geometry: always from rotation matrix (rear camera −Z).
+    const aim = rearCameraAzAlt(
+      alpha != null ? alpha : 0,
+      beta,
+      gamma,
+      state.screenAngle
+    );
+
+    let heading;
+    if (
+      typeof e.webkitCompassHeading === "number" &&
+      !Number.isNaN(e.webkitCompassHeading) &&
+      // Compass is unreliable when pointed near zenith/nadir
+      Math.abs(aim.alt) < 75
+    ) {
+      // iOS compass is the device facing direction; for rear-camera sky use,
+      // with screen orientation compensation via matrix pitch only.
+      // When upright, webkitCompassHeading ≈ camera azimuth on iPhone.
       heading = e.webkitCompassHeading;
-      const ang = state.screenAngle;
-      if (ang === 90) heading = norm360(heading + 90);
-      else if (ang === -90 || ang === 270) heading = norm360(heading - 90);
-      else if (ang === 180) heading = norm360(heading + 180);
-    } else if (alpha != null) {
-      heading = norm360(360 - alpha);
-      const ang = state.screenAngle;
-      if (ang === 90) heading = norm360(heading + 90);
-      else if (ang === -90 || ang === 270) heading = norm360(heading - 90);
+      // Landscape: top-of-device is not camera-forward — correct using screen angle
+      // empirically for rear camera viewfinder:
+      if (state.screenAngle === 90) heading = norm360(heading + 90);
+      else if (state.screenAngle === -90 || state.screenAngle === 270)
+        heading = norm360(heading - 90);
+      else if (state.screenAngle === 180) heading = norm360(heading + 180);
+    } else {
+      heading = aim.az;
     }
 
-    let pitch = null;
-    if (beta != null) {
-      const ang = state.screenAngle;
-      if (ang === 0 || ang === 180) pitch = 90 - beta;
-      else if (ang === 90) pitch = gamma != null ? -gamma : 90 - beta;
-      else if (ang === -90 || ang === 270) pitch = gamma != null ? gamma : 90 - beta;
-      else pitch = 90 - beta;
-      pitch = Math.max(-40, Math.min(95, pitch));
-    }
+    const pitch = aim.alt;
 
-    if (heading != null) {
-      state.headingRaw = heading;
-      state.smoothHeading = smoothAngle(
-        state.smoothHeading,
-        norm360(heading + state.headingOffset),
-        0.35
-      );
-      state.heading = state.smoothHeading;
-      state.orientReady = true;
-    }
-    if (pitch != null) {
-      state.pitchRaw = pitch;
-      state.smoothPitch = smoothLinear(
-        state.smoothPitch,
-        pitch + state.pitchOffset,
-        0.35
-      );
-      state.pitch = state.smoothPitch;
-    }
-    if (gamma != null) state.roll = gamma;
+    state.headingRaw = heading;
+    state.pitchRaw = pitch;
+    state.roll = gamma;
+
+    // Light smoothing — heavy lag makes AR feel "wrong"
+    state.smoothHeading = smoothAngle(
+      state.smoothHeading,
+      norm360(heading + state.headingOffset),
+      0.55
+    );
+    state.smoothPitch = smoothLinear(
+      state.smoothPitch,
+      pitch + state.pitchOffset,
+      0.55
+    );
+    state.heading = state.smoothHeading;
+    state.pitch = state.smoothPitch;
+    state.orientReady = true;
   }
 
   function startOrientation() {
@@ -635,18 +728,65 @@
 
   // ── Projection ───────────────────────────────────────────────────────
 
+  /**
+   * Project sky az/alt → screen pixels.
+   * Optical center = screen center (must match crosshair).
+   * Linear degrees→pixels is fine within ~half FOV; clamp far off-screen.
+   */
   function project(obj) {
     if (state.heading == null || state.pitch == null) return null;
     const dAz = deltaAngle(state.heading, obj.az);
     const dAlt = obj.alt - state.pitch;
     const { w, h } = cssSize();
     const fov = viewFov();
-    const x = w / 2 + (dAz / (fov.h / 2)) * (w / 2);
-    const y = h / 2 - (dAlt / (fov.v / 2)) * (h / 2);
+
+    // Pixels per degree (from center)
+    const ppdX = w / fov.h;
+    const ppdY = h / fov.v;
+
+    const x = w / 2 + dAz * ppdX;
+    const y = h / 2 - dAlt * ppdY;
     const angDist = Math.hypot(dAz, dAlt);
+    const margin = 1.02;
     const inFov =
-      Math.abs(dAz) < (fov.h / 2) * 1.05 && Math.abs(dAlt) < (fov.v / 2) * 1.05;
-    return { x, y, dAz, dAlt, angDist, inFov, fov };
+      Math.abs(dAz) < (fov.h / 2) * margin &&
+      Math.abs(dAlt) < (fov.v / 2) * margin;
+    return { x, y, dAz, dAlt, angDist, inFov, fov, ppdX, ppdY };
+  }
+
+  /** Keep marker on-screen edge with a direction tick if off-FOV */
+  function clampToFrame(x, y, w, h, pad) {
+    const p = pad || 28;
+    const cx = w / 2;
+    const cy = h / 2;
+    // Usable rect (above bottom sheet ~52vh → keep markers in upper ~55%)
+    const top = p + 40;
+    const bottom = h * 0.52;
+    const left = p;
+    const right = w - p;
+
+    if (x >= left && x <= right && y >= top && y <= bottom) {
+      return { x, y, clipped: false };
+    }
+
+    // Ray from center to (x,y), intersect usable rect
+    const dx = x - cx;
+    const dy = y - cy;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+      return { x: cx, y: cy, clipped: false };
+    }
+
+    let tMin = Infinity;
+    // left/right
+    if (dx > 0) tMin = Math.min(tMin, (right - cx) / dx);
+    else if (dx < 0) tMin = Math.min(tMin, (left - cx) / dx);
+    // top/bottom
+    if (dy > 0) tMin = Math.min(tMin, (bottom - cy) / dy);
+    else if (dy < 0) tMin = Math.min(tMin, (top - cy) / dy);
+
+    if (!Number.isFinite(tMin) || tMin < 0) tMin = 0.4;
+    tMin = Math.min(tMin, 1) * 0.92;
+    return { x: cx + dx * tMin, y: cy + dy * tMin, clipped: true };
   }
 
   function resizeCanvas() {
@@ -702,8 +842,10 @@
 
       if (!drawIt) continue;
 
-      const px = Math.max(20, Math.min(w - 20, p.x));
-      const py = Math.max(90, Math.min(h - 200, p.y));
+      // True projected position; soft-edge only if off the usable frame
+      const clamped = clampToFrame(p.x, p.y, w, h, 24);
+      const px = clamped.x;
+      const py = clamped.y;
 
       let r = 7;
       if (obj.kind === "iss") r = 11;
@@ -930,68 +1072,116 @@
     }
   }
 
+  function setEdge(el, on, label) {
+    if (!el) return;
+    el.classList.toggle("on", !!on);
+    el.setAttribute("aria-hidden", on ? "false" : "true");
+    if (label != null) el.textContent = label;
+  }
+
   function updateGuide() {
     const target = state.objects.find((o) => o.id === state.targetId);
+    const clearEdges = () => {
+      setEdge(els.edgeLeft, false, "◀");
+      setEdge(els.edgeRight, false, "▶");
+      setEdge(els.edgeUp, false, "▲");
+      setEdge(els.edgeDown, false, "▼");
+    };
+
     if (!target || state.heading == null || state.pitch == null) {
-      els.guideArrow.classList.add("hidden");
-      els.lockedBadge.classList.add("hidden");
+      els.guidePanel?.classList.add("hidden");
+      els.lockedBadge?.classList.add("hidden");
       els.btnClearTarget?.classList.add("hidden");
+      els.alignBanner?.classList.add("hidden");
+      clearEdges();
       return;
     }
     els.btnClearTarget?.classList.remove("hidden");
 
     if (target.alt < -2) {
-      els.guideArrow.classList.remove("hidden");
-      els.lockedBadge.classList.add("hidden");
-      const shaft = els.guideArrow.querySelector(".arrow-shaft");
-      if (shaft) shaft.style.transform = "rotate(180deg)";
-      els.guideText.textContent = target.label + " below horizon";
-      els.guideMeta.textContent =
-        "Toward " + compassLabel(target.az) + " · alt " + target.alt.toFixed(0) + "°";
+      els.lockedBadge?.classList.add("hidden");
+      els.guidePanel?.classList.remove("hidden");
+      clearEdges();
+      setEdge(els.edgeDown, true, "▼ below");
+      if (els.guidePrimary) els.guidePrimary.textContent = target.label + " is below the horizon";
+      if (els.guideSecondary)
+        els.guideSecondary.textContent =
+          "Face " + compassLabel(target.az) + " (" + target.az.toFixed(0) + "°) when it rises";
+      if (els.guideDelta) els.guideDelta.textContent = "alt " + target.alt.toFixed(0) + "°";
       return;
     }
 
     const p = project(target);
     if (!p) return;
 
-    if (p.angDist < lockThreshold()) {
-      els.guideArrow.classList.add("hidden");
-      els.lockedBadge.classList.remove("hidden");
-      els.lockedName.textContent = "Found · " + target.label;
-      els.lockedDetail.textContent =
-        (target.sub || "") +
-        " · " +
-        p.angDist.toFixed(1) +
-        "° · " +
-        target.alt.toFixed(0) +
-        "° up";
+    // Locked on — on screen near center
+    if (p.angDist < lockThreshold() && p.inFov) {
+      els.guidePanel?.classList.add("hidden");
+      els.lockedBadge?.classList.remove("hidden");
+      clearEdges();
+      if (els.lockedName) els.lockedName.textContent = "Aligned · " + target.label;
+      if (els.lockedDetail)
+        els.lockedDetail.textContent =
+          "Within " +
+          p.angDist.toFixed(1) +
+          "° of crosshair · " +
+          target.alt.toFixed(0) +
+          "° elev · tap Align if still off real sky";
+      els.alignBanner?.classList.remove("hidden");
       return;
     }
 
-    els.lockedBadge.classList.add("hidden");
-    els.guideArrow.classList.remove("hidden");
-    const angleDeg = (Math.atan2(p.dAz, p.dAlt) * 180) / Math.PI;
-    const shaft = els.guideArrow.querySelector(".arrow-shaft");
-    if (shaft) shaft.style.transform = "rotate(" + angleDeg + "deg)";
+    els.lockedBadge?.classList.add("hidden");
+    els.guidePanel?.classList.remove("hidden");
+    els.alignBanner?.classList.add("hidden");
 
-    const absAz = Math.abs(p.dAz);
-    const absAlt = Math.abs(p.dAlt);
-    let hint;
-    if (absAz > absAlt * 1.2) hint = p.dAz > 0 ? "Turn right" : "Turn left";
-    else if (absAlt > absAz * 1.2) hint = p.dAlt > 0 ? "Tilt up" : "Tilt down";
-    else
-      hint =
-        (p.dAz > 0 ? "Right" : "Left") + " + " + (p.dAlt > 0 ? "up" : "down");
+    // Edge cues — only the dominant directions (much clearer than a spinning arrow)
+    const azThr = 4;
+    const altThr = 4;
+    const left = p.dAz < -azThr;
+    const right = p.dAz > azThr;
+    const up = p.dAlt > altThr;
+    const down = p.dAlt < -altThr;
 
-    els.guideText.textContent = hint + " → " + target.label;
-    els.guideMeta.textContent =
-      p.angDist.toFixed(0) +
-      "° · " +
-      compassLabel(target.az) +
-      " · " +
-      target.alt.toFixed(0) +
-      "° elev" +
-      (target.kind ? " · " + target.kind : "");
+    setEdge(
+      els.edgeLeft,
+      left,
+      left ? "◀ " + Math.abs(p.dAz).toFixed(0) + "°" : "◀"
+    );
+    setEdge(
+      els.edgeRight,
+      right,
+      right ? Math.abs(p.dAz).toFixed(0) + "° ▶" : "▶"
+    );
+    setEdge(els.edgeUp, up, up ? "▲ " + Math.abs(p.dAlt).toFixed(0) + "°" : "▲");
+    setEdge(
+      els.edgeDown,
+      down,
+      down ? "▼ " + Math.abs(p.dAlt).toFixed(0) + "°" : "▼"
+    );
+
+    const parts = [];
+    if (left) parts.push("turn left " + Math.abs(p.dAz).toFixed(0) + "°");
+    if (right) parts.push("turn right " + Math.abs(p.dAz).toFixed(0) + "°");
+    if (up) parts.push("tilt up " + Math.abs(p.dAlt).toFixed(0) + "°");
+    if (down) parts.push("tilt down " + Math.abs(p.dAlt).toFixed(0) + "°");
+
+    if (els.guidePrimary)
+      els.guidePrimary.textContent = parts.length
+        ? parts.join(" · ")
+        : "Move slowly toward " + target.label;
+    if (els.guideSecondary)
+      els.guideSecondary.textContent =
+        target.label +
+        " · " +
+        compassLabel(target.az) +
+        " " +
+        target.az.toFixed(0) +
+        "° · elev " +
+        target.alt.toFixed(0) +
+        "°";
+    if (els.guideDelta)
+      els.guideDelta.textContent = p.angDist.toFixed(0) + "° from crosshair";
   }
 
   const LAYER_COPY = {
@@ -1181,6 +1371,10 @@
       iss;
   }
 
+  /**
+   * Align AR to the real sky: user puts the real Moon (etc.) under the crosshair,
+   * we set offsets so model az/alt match current device aim.
+   */
   function calibrateToAim() {
     let body = state.objects.find((o) => o.id === state.targetId);
     if (!body || body.alt < -2) {
@@ -1188,34 +1382,70 @@
         (o) =>
           o.kind === "graha" &&
           o.alt > 5 &&
-          (o.label === "Candra" || o.label === "Śukra" || o.label === "Guru" || o.label === "Sūrya")
+          (o.label === "Candra" ||
+            o.label === "Śukra" ||
+            o.label === "Guru" ||
+            o.label === "Sūrya")
       );
     }
     if (!body || state.headingRaw == null || state.pitchRaw == null) {
-      setStatus("Center Moon/Venus, select it, then Calibrate", "warn");
+      setStatus("Select Moon/Venus, put the real one in the crosshair, tap Align", "warn");
+      if (els.alignBanner) {
+        els.alignBanner.classList.remove("hidden");
+      }
       return;
     }
+
+    // Current raw device aim should equal body sky position after offset
     state.headingOffset = deltaAngle(state.headingRaw, body.az);
     state.pitchOffset = body.alt - state.pitchRaw;
     state.heading = body.az;
     state.pitch = body.alt;
     state.smoothHeading = body.az;
     state.smoothPitch = body.alt;
-    if (els.headingOffset) {
-      els.headingOffset.value = String(
-        Math.max(-45, Math.min(45, Math.round(state.headingOffset)))
+
+    // Persist for session
+    try {
+      localStorage.setItem(
+        "skyAlign",
+        JSON.stringify({
+          headingOffset: state.headingOffset,
+          pitchOffset: state.pitchOffset,
+          at: Date.now(),
+        })
       );
+    } catch (_) {}
+
+    if (els.headingOffset) {
+      const hv = Math.max(-60, Math.min(60, Math.round(state.headingOffset)));
+      els.headingOffset.min = "-60";
+      els.headingOffset.max = "60";
+      els.headingOffset.value = String(hv);
       els.headingOffsetVal.textContent =
         (state.headingOffset >= 0 ? "+" : "") + state.headingOffset.toFixed(0) + "°";
     }
     if (els.pitchOffset) {
-      els.pitchOffset.value = String(
-        Math.max(-30, Math.min(30, Math.round(state.pitchOffset)))
-      );
+      const pv = Math.max(-40, Math.min(40, Math.round(state.pitchOffset)));
+      els.pitchOffset.min = "-40";
+      els.pitchOffset.max = "40";
+      els.pitchOffset.value = String(pv);
       els.pitchOffsetVal.textContent =
         (state.pitchOffset >= 0 ? "+" : "") + state.pitchOffset.toFixed(0) + "°";
     }
-    setStatus("Calibrated on " + body.label, "ok");
+    setStatus("Aligned on " + body.label + " · overlays should match now", "ok");
+    els.alignBanner?.classList.add("hidden");
+  }
+
+  function loadSavedAlign() {
+    try {
+      const raw = localStorage.getItem("skyAlign");
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      // Expire after 12 hours (compass bias drifts)
+      if (data.at && Date.now() - data.at > 12 * 3600 * 1000) return;
+      if (typeof data.headingOffset === "number") state.headingOffset = data.headingOffset;
+      if (typeof data.pitchOffset === "number") state.pitchOffset = data.pitchOffset;
+    } catch (_) {}
   }
 
   // ── Loop ─────────────────────────────────────────────────────────────
@@ -1328,6 +1558,7 @@
   }
 
   function init() {
+    loadSavedAlign();
     try {
       resizeCanvas();
     } catch (err) {
@@ -1371,6 +1602,7 @@
       updateObjectList();
     });
     els.btnCalibrate?.addEventListener("click", calibrateToAim);
+    $("btnAlignQuick")?.addEventListener("click", calibrateToAim);
 
     els.layerTabs?.forEach((tab) => {
       tab.addEventListener("click", () => {

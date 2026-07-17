@@ -39,19 +39,22 @@
       <span id="zoomVal" class="zoom-val">1×</span>
     </div>
 
+    <!-- Optical center — must match projection origin -->
     <div class="crosshair" aria-hidden="true">
       <span class="ring"></span>
       <span class="dot"></span>
     </div>
 
-    <div id="guideArrow" class="guide-arrow hidden" aria-live="polite">
-      <div class="arrow-shaft">
-        <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-          <path d="M32 6 L54 34 H40 V58 H24 V34 H10 Z" fill="currentColor"/>
-        </svg>
-      </div>
-      <div id="guideText" class="guide-text">Point here</div>
-      <div id="guideMeta" class="guide-meta"></div>
+    <!-- Edge direction cues (clearer than a spinning arrow) -->
+    <div id="edgeLeft" class="edge-cue edge-left" aria-hidden="true">◀</div>
+    <div id="edgeRight" class="edge-cue edge-right" aria-hidden="true">▶</div>
+    <div id="edgeUp" class="edge-cue edge-up" aria-hidden="true">▲</div>
+    <div id="edgeDown" class="edge-cue edge-down" aria-hidden="true">▼</div>
+
+    <div id="guidePanel" class="guide-panel hidden" aria-live="polite">
+      <div id="guidePrimary" class="guide-primary">—</div>
+      <div id="guideSecondary" class="guide-secondary">—</div>
+      <div id="guideDelta" class="guide-delta">—</div>
     </div>
 
     <div id="lockedBadge" class="locked-badge hidden">
@@ -59,10 +62,18 @@
       <span id="lockedDetail"></span>
     </div>
 
+    <div id="alignBanner" class="align-banner hidden">
+      <p>
+        <strong>Align:</strong> put the <em>real</em> Moon (or selected graha) in the crosshair,
+        then tap <strong>Align</strong> below. Fixes compass / tilt mismatch.
+      </p>
+      <button type="button" id="btnAlignQuick" class="primary-btn">Align now</button>
+    </div>
+
     <div id="pointingHud" class="pointing-hud">
       <div class="hud-label">Looking toward</div>
       <div id="pointingMain" class="hud-main">—</div>
-      <div id="pointingSub" class="hud-sub">Pick a layer below</div>
+      <div id="pointingSub" class="hud-sub">Pick a layer · Align once for accuracy</div>
     </div>
 
     <!-- Bottom: layer tabs + list for active layer only -->
@@ -75,7 +86,7 @@
           <p id="layerHint" class="layer-hint">Grahas in the sky right now</p>
         </div>
         <div class="head-actions">
-          <button type="button" id="btnCalibrate" class="text-btn">Calibrate</button>
+          <button type="button" id="btnCalibrate" class="text-btn">Align</button>
           <button type="button" id="btnClearTarget" class="text-btn hidden">Clear</button>
         </div>
       </div>
@@ -160,7 +171,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-  <script src="astro-extras.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="astro-extras.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
