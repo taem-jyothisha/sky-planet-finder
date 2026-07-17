@@ -179,20 +179,26 @@
   }
 
   async function fetchISS() {
-    const res = await fetch(
-      "https://api.wheretheiss.at/v1/satellites/25544",
-      { cache: "no-store" }
-    );
-    if (!res.ok) throw new Error("ISS feed HTTP " + res.status);
-    const data = await res.json();
-    return {
-      lat: data.latitude,
-      lon: data.longitude,
-      altKm: data.altitude,
-      velocity: data.velocity,
-      visibility: data.visibility,
-      timestamp: data.timestamp,
-    };
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+    try {
+      const res = await fetch(
+        "https://api.wheretheiss.at/v1/satellites/25544",
+        { cache: "no-store", signal: ctrl ? ctrl.signal : undefined }
+      );
+      if (!res.ok) throw new Error("ISS feed HTTP " + res.status);
+      const data = await res.json();
+      return {
+        lat: data.latitude,
+        lon: data.longitude,
+        altKm: data.altitude,
+        velocity: data.velocity,
+        visibility: data.visibility,
+        timestamp: data.timestamp,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   global.SkyExtras = {

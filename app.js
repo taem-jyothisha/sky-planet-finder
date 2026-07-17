@@ -156,26 +156,49 @@
 
   // ── Sensors ──────────────────────────────────────────────────────────
 
+  function withTimeout(promise, ms, label) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(
+        () => reject(new Error((label || "Step") + " timed out (" + ms / 1000 + "s)")),
+        ms
+      );
+      promise.then(
+        (v) => {
+          clearTimeout(t);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(t);
+          reject(e);
+        }
+      );
+    });
+  }
+
   async function requestOrientationPermission() {
-    if (
-      typeof DeviceOrientationEvent !== "undefined" &&
-      typeof DeviceOrientationEvent.requestPermission === "function"
-    ) {
-      const res = await DeviceOrientationEvent.requestPermission();
-      if (res !== "granted") {
-        throw new Error(
-          "Motion / compass denied. Settings → Safari → Motion & Orientation → Allow."
-        );
+    // Never block forever — iOS may leave the prompt pending
+    const run = async () => {
+      if (
+        typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function"
+      ) {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== "granted") {
+          throw new Error(
+            "Motion denied. Settings → Safari → Motion & Orientation → Allow."
+          );
+        }
       }
-    }
-    if (
-      typeof DeviceMotionEvent !== "undefined" &&
-      typeof DeviceMotionEvent.requestPermission === "function"
-    ) {
-      try {
-        await DeviceMotionEvent.requestPermission();
-      } catch (_) {}
-    }
+      if (
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function"
+      ) {
+        try {
+          await DeviceMotionEvent.requestPermission();
+        } catch (_) {}
+      }
+    };
+    await withTimeout(run(), 12000, "Motion permission");
   }
 
   function onOrientation(e) {
@@ -255,22 +278,77 @@
     }
   }
 
+  function getPositionOnce(options) {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not available"));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
+    });
+  }
+
   async function getLocation() {
-    if (!navigator.geolocation) throw new Error("Geolocation not available.");
-    const first = await new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
+    if (!navigator.geolocation) {
+      throw new Error("Geolocation not available.");
+    }
+    // Fast path first (network/wifi), then refine with high accuracy — avoids iOS hang
+    let pos = null;
+    try {
+      pos = await getPositionOnce({
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 60000,
+      });
+    } catch (_) {
+      /* try high accuracy next */
+    }
+    if (!pos) {
+      pos = await getPositionOnce({
         enableHighAccuracy: true,
-        timeout: 25000,
+        timeout: 12000,
         maximumAge: 0,
       });
-    });
-    applyGeo(first);
+    }
+    applyGeo(pos);
+
     if (state.geoWatchId != null) navigator.geolocation.clearWatch(state.geoWatchId);
-    state.geoWatchId = navigator.geolocation.watchPosition(applyGeo, () => {}, {
-      enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 20000,
-    });
+    state.geoWatchId = navigator.geolocation.watchPosition(
+      applyGeo,
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
+    );
+  }
+
+  /** Fallback rough location so sky math still works if GPS is denied/slow */
+  async function getLocationFallback() {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch("https://ipapi.co/json/", { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error("ip lookup failed");
+      const data = await res.json();
+      if (data.latitude != null && data.longitude != null) {
+        applyGeo({
+          coords: {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            accuracy: 5000,
+            altitude: null,
+          },
+        });
+        setStatus("Approx location (IP) · enable Precise GPS for accuracy", "warn");
+        return true;
+      }
+    } catch (_) {}
+    // Last resort: still open app (user can recalibrate); use equator default only as last resort
+    state.lat = state.lat ?? 20;
+    state.lon = state.lon ?? 78;
+    state.accM = 99999;
+    setLocChip();
+    setStatus("No GPS · set Precise Location in Settings", "warn");
+    return false;
   }
 
   // ── Camera + zoom ────────────────────────────────────────────────────
@@ -395,7 +473,7 @@
     if (state.lat == null) return;
     state.lastIssFetch = performance.now();
     try {
-      const iss = await X().fetchISS();
+      const iss = await withTimeout(X().fetchISS(), 8000, "ISS feed");
       const look = X().lookAngles(
         state.lat,
         state.lon,
@@ -1067,31 +1145,96 @@
   }
 
   async function startAll() {
+    // Prevent double-taps
+    if (state._starting) return;
+    state._starting = true;
+
     showGateError("");
-    els.btnGateStart.disabled = true;
-    els.btnStart.disabled = true;
-    setStatus("Permissions…", "warn");
+    if (els.btnGateStart) {
+      els.btnGateStart.disabled = true;
+      els.btnGateStart.textContent = "Starting…";
+    }
+    if (els.btnStart) els.btnStart.disabled = true;
+    setStatus("Starting…", "warn");
+
+    const notes = [];
+
     try {
-      if (!X()) throw new Error("SkyExtras failed to load.");
-      await requestOrientationPermission();
-      startOrientation();
-      setStatus("High-accuracy GPS…", "warn");
-      await getLocation();
+      if (typeof Astronomy === "undefined") {
+        throw new Error(
+          "Astronomy library failed to load. Check network, then reload the page."
+        );
+      }
+      if (!X()) {
+        throw new Error(
+          "Sky extras failed to load. Hard-refresh the page (close tab and reopen)."
+        );
+      }
+
+      // 1) CAMERA FIRST — iOS requires getUserMedia close to the user tap.
+      //    Requesting GPS/motion before camera often hangs Safari forever.
       setStatus("Camera…", "warn");
-      await startCamera();
-      await refreshISS(true);
+      showGateError("Requesting camera…");
+      await withTimeout(startCamera(), 20000, "Camera");
+
+      // 2) Motion / compass (optional if user denies)
+      setStatus("Motion / compass…", "warn");
+      showGateError("Requesting motion…");
+      try {
+        await requestOrientationPermission();
+        startOrientation();
+      } catch (err) {
+        startOrientation(); // still listen if events exist without prompt
+        notes.push("Compass: " + (err.message || "not granted"));
+      }
+
+      // 3) Location (optional fallback)
+      setStatus("Location…", "warn");
+      showGateError("Requesting location…");
+      try {
+        await withTimeout(getLocation(), 15000, "Location");
+      } catch (err) {
+        notes.push("GPS: " + (err.message || "failed"));
+        await getLocationFallback();
+      }
+
+      // 4) ISS — never block UI
+      refreshISS(true).catch(() => {});
+
       computeSky();
       buildObjectList();
       state.running = true;
       els.gate.classList.add("hidden");
-      setStatus("Live · graha · nakṣatra · rāśi · ISS", "ok");
+
+      // Default aim so UI is usable before compass wakes
+      if (state.heading == null) {
+        state.heading = 0;
+        state.pitch = 35;
+      }
+
+      setStatus(
+        notes.length
+          ? "Live (partial) · " + notes.join(" · ")
+          : "Live · graha · nakṣatra · rāśi · ISS",
+        notes.length ? "warn" : "ok"
+      );
       requestAnimationFrame(tick);
     } catch (err) {
       console.error(err);
-      showGateError(err.message || String(err));
+      const msg = err && err.message ? err.message : String(err);
+      showGateError(
+        msg +
+          "\n\nTips: use Safari · Settings → Safari → Camera/Location/Motion Allow · " +
+          "Precise Location On · reload page · try again."
+      );
       setStatus("Start failed", "warn");
-      els.btnGateStart.disabled = false;
-      els.btnStart.disabled = false;
+    } finally {
+      state._starting = false;
+      if (els.btnGateStart) {
+        els.btnGateStart.disabled = false;
+        els.btnGateStart.textContent = "Allow & start";
+      }
+      if (els.btnStart) els.btnStart.disabled = false;
     }
   }
 
@@ -1110,7 +1253,11 @@
   }
 
   function init() {
-    resizeCanvas();
+    try {
+      resizeCanvas();
+    } catch (err) {
+      console.error("resizeCanvas", err);
+    }
     updateScreenAngle();
     window.addEventListener("resize", () => {
       resizeCanvas();
@@ -1118,12 +1265,31 @@
     });
 
     const app = document.getElementById("app");
-    app.addEventListener("touchstart", onTouchStart, { passive: true });
-    app.addEventListener("touchmove", onTouchMove, { passive: false });
-    app.addEventListener("touchend", onTouchEnd, { passive: true });
+    if (app) {
+      app.addEventListener("touchstart", onTouchStart, { passive: true });
+      app.addEventListener("touchmove", onTouchMove, { passive: false });
+      app.addEventListener("touchend", onTouchEnd, { passive: true });
+    }
 
-    els.btnGateStart.addEventListener("click", startAll);
-    els.btnStart.addEventListener("click", startAll);
+    // Prefer pointerup/click — more reliable on iOS than touch-only paths
+    const bindStart = (el) => {
+      if (!el) return;
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        startAll();
+      });
+    };
+    bindStart(els.btnGateStart);
+    bindStart(els.btnStart);
+
+    // Surface load failures on the gate immediately
+    if (typeof Astronomy === "undefined") {
+      showGateError(
+        "Astronomy library not loaded (network/CDN). Connect to the internet and reload."
+      );
+    } else if (!X()) {
+      showGateError("Sky extras not loaded. Hard-refresh the page.");
+    }
     els.btnClearTarget?.addEventListener("click", () => {
       state.targetId = null;
       updateGuide();
