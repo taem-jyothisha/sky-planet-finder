@@ -1036,18 +1036,7 @@
     let nearest = null;
     let nearestPointlike = null;
 
-    // Point markers: all enabled overlays + selected target
-    const drawList = state.objects.filter(
-      (o) =>
-        (o.kind === "graha" && state.overlays.graha) ||
-        (o.kind === "iss" && state.overlays.iss) ||
-        // Rāśi/nak markers are belt labels; still allow selected find-target
-        o.id === state.targetId ||
-        (o.kind === "rasi" && state.overlays.rasi && false) || // belt handles rasi
-        (o.kind === "nakshatra" && state.overlays.nakshatra && false)
-    );
-    // Always include graha points when graha overlay on (all 9, even below horizon)
-    // Rebuild clean list:
+    // Point markers: all 9 grahas when overlay on + ISS + selected target
     const points = state.objects.filter((o) => {
       if (o.id === state.targetId) return true;
       if (o.kind === "graha" && state.overlays.graha) return true;
