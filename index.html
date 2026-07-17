@@ -16,26 +16,35 @@
 </head>
 <body>
   <div id="app">
-    <!-- Camera -->
     <video id="camera" playsinline webkit-playsinline muted autoplay></video>
     <canvas id="skyCanvas" aria-hidden="true"></canvas>
 
-    <!-- Top status -->
     <header class="top-bar">
       <div class="brand">
         <span class="logo">✦</span>
         <span>Sky</span>
       </div>
-      <div id="statusChip" class="chip muted">Starting…</div>
+      <div class="chips">
+        <div id="locChip" class="chip muted">GPS…</div>
+        <div id="statusChip" class="chip muted">Starting…</div>
+      </div>
     </header>
 
-    <!-- Crosshair -->
+    <!-- Zoom (iPhone 15 Pro Max: 0.5 / 1 / 2 / 5) -->
+    <div class="zoom-bar" aria-label="Zoom">
+      <button type="button" class="zoom-btn" data-zoom="0.5">0.5</button>
+      <button type="button" class="zoom-btn active" data-zoom="1">1×</button>
+      <button type="button" class="zoom-btn" data-zoom="2">2×</button>
+      <button type="button" class="zoom-btn" data-zoom="5">5×</button>
+      <input type="range" id="zoomSlider" min="0.5" max="8" step="0.1" value="1" aria-label="Zoom slider" />
+      <span id="zoomVal" class="zoom-val">1×</span>
+    </div>
+
     <div class="crosshair" aria-hidden="true">
       <span class="ring"></span>
       <span class="dot"></span>
     </div>
 
-    <!-- Guidance when hunting a planet -->
     <div id="guideArrow" class="guide-arrow hidden" aria-live="polite">
       <div class="arrow-shaft">
         <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
@@ -46,57 +55,62 @@
       <div id="guideMeta" class="guide-meta"></div>
     </div>
 
-    <!-- Locked-on badge -->
     <div id="lockedBadge" class="locked-badge hidden">
       <strong id="lockedName">—</strong>
       <span id="lockedDetail"></span>
     </div>
 
-    <!-- HUD: what you're pointing at -->
     <div id="pointingHud" class="pointing-hud">
       <div class="hud-label">Looking toward</div>
       <div id="pointingMain" class="hud-main">—</div>
       <div id="pointingSub" class="hud-sub">Enable location &amp; compass</div>
     </div>
 
-    <!-- Bottom: planet picker -->
     <footer class="bottom-sheet">
       <div class="sheet-head">
         <h1>Find a planet</h1>
-        <button type="button" id="btnClearTarget" class="text-btn hidden">Clear guide</button>
+        <div class="head-actions">
+          <button type="button" id="btnCalibrate" class="text-btn">Calibrate</button>
+          <button type="button" id="btnClearTarget" class="text-btn hidden">Clear</button>
+        </div>
       </div>
       <div id="planetList" class="planet-list" role="listbox" aria-label="Planets"></div>
       <div class="sheet-foot">
         <label class="calib">
-          Compass trim
+          Compass
           <input type="range" id="headingOffset" min="-45" max="45" value="0" />
           <span id="headingOffsetVal">0°</span>
         </label>
+        <label class="calib">
+          Elev
+          <input type="range" id="pitchOffset" min="-30" max="30" value="0" />
+          <span id="pitchOffsetVal">0°</span>
+        </label>
         <button type="button" id="btnStart" class="primary-btn">Start sky view</button>
       </div>
+      <p id="debugLine" class="debug-line">—</p>
       <p class="disclaimer">
-        Approximate AR guide · uses your location, time, and device compass.
-        Best outdoors · hold phone upright · calibrate compass if off.
+        iPhone 15 Pro Max · high-accuracy GPS · pinch or 0.5/1/2/5× zoom.
+        If labels are offset: center the Moon (or Venus) in the crosshair → tap <strong>Calibrate</strong>.
       </p>
     </footer>
 
-    <!-- Permission / start overlay -->
     <div id="gate" class="gate">
       <div class="gate-card">
         <div class="gate-icon">☾</div>
         <h2>Point at the sky</h2>
         <p>
-          Live camera + on-screen labels show which planet you’re looking at.
-          Pick a planet below to get arrows guiding you toward it.
+          Uses precise GPS, the rear camera, and compass on your iPhone.
+          Zoom in to lock planets; calibrate once if the compass is off.
         </p>
         <ul class="gate-needs">
-          <li>Camera (rear)</li>
-          <li>Location (for sky positions)</li>
-          <li>Motion / compass (to aim)</li>
+          <li>Camera (rear) + zoom</li>
+          <li>Precise Location (on for Safari)</li>
+          <li>Motion &amp; compass</li>
         </ul>
         <p class="ios-hint">
-          <strong>iPhone:</strong> use Safari · when asked, allow Camera, Location, and Motion.
-          Then Share → <strong>Add to Home Screen</strong> for a full-screen app icon.
+          <strong>iPhone 15 Pro Max:</strong> Settings → Privacy → Location Services → Safari → <strong>While Using</strong> + Precise Location <strong>On</strong>.
+          Wave the phone in a figure‑8 after start if the compass is sleepy.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
         <p id="gateError" class="error" hidden></p>

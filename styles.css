@@ -40,7 +40,8 @@ html, body {
   height: 100%;
   object-fit: cover;
   background: #000;
-  transform: scaleX(1);
+  transform: scale(1);
+  transform-origin: center center;
 }
 
 #skyCanvas {
@@ -60,9 +61,76 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
   padding: calc(0.75rem + var(--safe-t)) 1rem 0.5rem;
   background: linear-gradient(180deg, rgba(0,0,0,0.65), transparent);
   pointer-events: none;
+}
+.chips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  max-width: 70vw;
+}
+.zoom-bar {
+  position: absolute;
+  left: 50%;
+  top: calc(3.4rem + var(--safe-t));
+  transform: translateX(-50%);
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 96vw;
+  pointer-events: auto;
+}
+.zoom-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.28rem 0.45rem;
+  border-radius: 999px;
+  cursor: pointer;
+  min-width: 2rem;
+}
+.zoom-btn.active {
+  background: rgba(126, 182, 255, 0.25);
+  color: #fff;
+}
+.zoom-bar input[type="range"] {
+  width: 5.5rem;
+  accent-color: var(--accent);
+}
+.zoom-val {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-2);
+  min-width: 4.5rem;
+  white-space: nowrap;
+}
+#camera {
+  transition: transform 0.08s linear;
+}
+.head-actions { display: flex; gap: 0.35rem; align-items: center; }
+.debug-line {
+  margin: 0;
+  font-size: 0.65rem;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--muted);
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand {
