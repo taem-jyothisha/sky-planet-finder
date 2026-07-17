@@ -388,6 +388,11 @@ body.guiding .map-controls:not(.force-show) {
   pointer-events: none;
   transform: translateY(10px);
 }
+body.guiding .map-controls.force-show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
 
 .fab {
   display: flex;
