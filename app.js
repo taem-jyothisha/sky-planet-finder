@@ -39,8 +39,11 @@
     zoomBtns: document.querySelectorAll("[data-zoom]"),
     zoomSlider: $("zoomSlider"),
     debugLine: $("debugLine"),
-    layerBtns: document.querySelectorAll("[data-layer]"),
+    layerTabs: document.querySelectorAll(".layer-tab[data-layer]"),
     listTitle: $("listTitle"),
+    layerHint: $("layerHint"),
+    listMeta: $("listMeta"),
+    onlyAbove: $("onlyAbove"),
   };
 
   const ctx = els.canvas.getContext("2d");
@@ -66,7 +69,9 @@
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
-    layers: { graha: true, nakshatra: true, rasi: true, iss: true },
+    /** Only one layer shown on camera + list at a time */
+    activeLayer: "graha",
+    onlyAbove: true,
     running: false,
     orientReady: false,
     lastBodyCompute: 0,
@@ -468,7 +473,6 @@
   // ── Sky catalog ──────────────────────────────────────────────────────
 
   async function refreshISS(force) {
-    if (!state.layers.iss) return;
     if (!force && performance.now() - state.lastIssFetch < 4000) return;
     if (state.lat == null) return;
     state.lastIssFetch = performance.now();
@@ -504,114 +508,105 @@
     const aya = Ex.lahiriAyanamsa(time);
     const out = [];
 
-    // ── Grahas ──
-    if (state.layers.graha) {
-      for (const g of Ex.GRAHAS) {
-        try {
-          let az, alt, tropLon, sidLon, mag = null;
-          if (g.node === "rahu") {
-            tropLon = Ex.meanAscendingNode(time);
-            sidLon = Ex.tropicalToSidereal(tropLon, time);
-            const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
-            az = hor.azimuth;
-            alt = hor.altitude;
-          } else if (g.node === "ketu") {
-            tropLon = Ex.norm360(Ex.meanAscendingNode(time) + 180);
-            sidLon = Ex.tropicalToSidereal(tropLon, time);
-            const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
-            az = hor.azimuth;
-            alt = hor.altitude;
-          } else {
-            const equ = Astronomy.Equator(g.body, time, observer, true, true);
-            const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
-            az = hor.azimuth;
-            alt = hor.altitude;
-            tropLon = Ex.tropicalEclipticLon(g.body, time);
-            sidLon = Ex.tropicalToSidereal(tropLon, time);
-            try {
-              if (g.body === "Sun") mag = -26.7;
-              else mag = Astronomy.Illumination(g.body, time).mag;
-            } catch (_) {}
-          }
-          out.push({
-            id: "graha:" + g.id,
-            kind: "graha",
-            label: g.label,
-            sub: g.en + " · " + Ex.rasiName(sidLon) + " · " + Ex.nakshatraName(sidLon),
-            color: g.color,
-            az,
-            alt,
-            mag,
-            sidLon,
-            tropLon,
-            rasi: Ex.rasiName(sidLon),
-            nakshatra: Ex.nakshatraName(sidLon),
-          });
-        } catch (err) {
-          console.warn("graha", g.id, err);
+    // Always compute all layers; UI shows one at a time
+    for (const g of Ex.GRAHAS) {
+      try {
+        let az, alt, tropLon, sidLon, mag = null;
+        if (g.node === "rahu") {
+          tropLon = Ex.meanAscendingNode(time);
+          sidLon = Ex.tropicalToSidereal(tropLon, time);
+          const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
+          az = hor.azimuth;
+          alt = hor.altitude;
+        } else if (g.node === "ketu") {
+          tropLon = Ex.norm360(Ex.meanAscendingNode(time) + 180);
+          sidLon = Ex.tropicalToSidereal(tropLon, time);
+          const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
+          az = hor.azimuth;
+          alt = hor.altitude;
+        } else {
+          const equ = Astronomy.Equator(g.body, time, observer, true, true);
+          const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
+          az = hor.azimuth;
+          alt = hor.altitude;
+          tropLon = Ex.tropicalEclipticLon(g.body, time);
+          sidLon = Ex.tropicalToSidereal(tropLon, time);
+          try {
+            if (g.body === "Sun") mag = -26.7;
+            else mag = Astronomy.Illumination(g.body, time).mag;
+          } catch (_) {}
         }
+        out.push({
+          id: "graha:" + g.id,
+          kind: "graha",
+          label: g.label,
+          sub: g.en + " · " + Ex.rasiName(sidLon) + " · " + Ex.nakshatraName(sidLon),
+          color: g.color,
+          az,
+          alt,
+          mag,
+          sidLon,
+          tropLon,
+          rasi: Ex.rasiName(sidLon),
+          nakshatra: Ex.nakshatraName(sidLon),
+        });
+      } catch (err) {
+        console.warn("graha", g.id, err);
       }
     }
 
-    // ── Rāśis (center of each 30° sidereal sign on ecliptic) ──
-    if (state.layers.rasi) {
-      Ex.RASIS.forEach((r, i) => {
-        const sidCenter = i * 30 + 15;
-        const trop = Ex.siderealToTropical(sidCenter, time);
-        try {
-          const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
-          out.push({
-            id: "rasi:" + r.id,
-            kind: "rasi",
-            label: r.label,
-            sub: r.en + " · center",
-            color: "hsl(" + (i * 30) + " 70% 70%)",
-            az: hor.azimuth,
-            alt: hor.altitude,
-            mag: null,
-            sidLon: sidCenter,
-            region: true,
-          });
-        } catch (_) {}
-      });
-    }
+    Ex.RASIS.forEach((r, i) => {
+      const sidCenter = i * 30 + 15;
+      const trop = Ex.siderealToTropical(sidCenter, time);
+      try {
+        const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
+        out.push({
+          id: "rasi:" + r.id,
+          kind: "rasi",
+          label: r.label,
+          sub: r.en + " rāśi · ecliptic center",
+          color: "hsl(" + (i * 30) + " 70% 70%)",
+          az: hor.azimuth,
+          alt: hor.altitude,
+          mag: null,
+          sidLon: sidCenter,
+          region: true,
+        });
+      } catch (_) {}
+    });
 
-    // ── Nakṣatras (center of each 13°20' mansion) ──
-    if (state.layers.nakshatra) {
-      const width = 360 / 27;
-      Ex.NAKSHATRAS.forEach((name, i) => {
-        const sidCenter = i * width + width / 2;
-        const trop = Ex.siderealToTropical(sidCenter, time);
-        try {
-          const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
-          out.push({
-            id: "nak:" + i,
-            kind: "nakshatra",
-            label: name,
-            sub: "Nakṣatra " + (i + 1) + "/27",
-            color: "hsl(" + ((i * 13.3 + 180) % 360) + " 65% 72%)",
-            az: hor.azimuth,
-            alt: hor.altitude,
-            mag: null,
-            sidLon: sidCenter,
-            region: true,
-          });
-        } catch (_) {}
-      });
-    }
+    const width = 360 / 27;
+    Ex.NAKSHATRAS.forEach((name, i) => {
+      const sidCenter = i * width + width / 2;
+      const trop = Ex.siderealToTropical(sidCenter, time);
+      try {
+        const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
+        out.push({
+          id: "nak:" + i,
+          kind: "nakshatra",
+          label: name,
+          sub: "Nakṣatra " + (i + 1) + " of 27",
+          color: "hsl(" + ((i * 13.3 + 180) % 360) + " 65% 72%)",
+          az: hor.azimuth,
+          alt: hor.altitude,
+          mag: null,
+          sidLon: sidCenter,
+          region: true,
+        });
+      } catch (_) {}
+    });
 
-    // ── ISS ──
-    if (state.layers.iss && state.iss) {
+    if (state.iss) {
       out.push({
         id: "iss",
         kind: "iss",
         label: "ISS",
         sub:
-          (state.iss.alt > 0 ? "Above horizon" : "Below") +
+          (state.iss.alt > 0 ? "Above horizon" : "Below horizon") +
           " · " +
           Math.round(state.iss.rangeKm || 0) +
-          " km · " +
-          (state.iss.visibility || ""),
+          " km" +
+          (state.iss.visibility ? " · " + state.iss.visibility : ""),
         color: "#6dffa8",
         az: state.iss.az,
         alt: state.iss.alt,
@@ -670,33 +665,40 @@
     const { w, h } = cssSize();
     ctx.clearRect(0, 0, w, h);
 
-    // Ecliptic guide (sample points)
-    if (state.layers.rasi || state.layers.nakshatra) {
+    // Ecliptic guide for zodiac / nakṣatra layers
+    if (state.activeLayer === "rasi" || state.activeLayer === "nakshatra") {
       drawEclipticBand(w, h);
     }
 
     let nearest = null;
     let nearestPointlike = null;
 
-    for (const obj of state.objects) {
-      if (obj.alt < -12) continue;
+    // Only draw the active layer (+ keep selected target if any)
+    const drawList = state.objects.filter(
+      (o) => o.kind === state.activeLayer || o.id === state.targetId
+    );
+
+    for (const obj of drawList) {
+      if (obj.alt < -12 && obj.id !== state.targetId) continue;
       const p = project(obj);
       if (!p) continue;
 
-      if (!nearest || p.angDist < nearest.angDist) nearest = { obj, ...p };
-
-      const pointlike = obj.kind === "graha" || obj.kind === "iss";
-      if (pointlike && (!nearestPointlike || p.angDist < nearestPointlike.angDist)) {
-        nearestPointlike = { obj, ...p };
+      if (obj.kind === state.activeLayer) {
+        if (!nearest || p.angDist < nearest.angDist) nearest = { obj, ...p };
+        const pointlike = obj.kind === "graha" || obj.kind === "iss";
+        if (pointlike && (!nearestPointlike || p.angDist < nearestPointlike.angDist)) {
+          nearestPointlike = { obj, ...p };
+        }
       }
 
       const isTarget = obj.id === state.targetId;
       const drawIt =
-        p.inFov ||
         isTarget ||
-        (pointlike && p.angDist < 30) ||
-        (obj.kind === "rasi" && p.angDist < 18) ||
-        (obj.kind === "nakshatra" && p.angDist < 14);
+        p.inFov ||
+        (obj.kind === "graha" && p.angDist < 30) ||
+        (obj.kind === "iss" && p.angDist < 40) ||
+        (obj.kind === "rasi" && p.angDist < 22) ||
+        (obj.kind === "nakshatra" && p.angDist < 16);
 
       if (!drawIt) continue;
 
@@ -865,9 +867,7 @@
 
     for (const obj of state.objects) {
       if (obj.alt < 0 || state.heading == null) continue;
-      if (obj.kind === "nakshatra" && !state.layers.nakshatra) continue;
-      // Only show graha, iss, rasi centers on radar (less clutter)
-      if (obj.kind === "nakshatra") continue;
+      if (obj.kind !== state.activeLayer) continue;
       const dAz = deltaAngle(state.heading, obj.az);
       const rr = R * (1 - Math.max(0, Math.min(90, obj.alt)) / 100);
       const rad = (dAz * Math.PI) / 180;
@@ -994,75 +994,147 @@
       (target.kind ? " · " + target.kind : "");
   }
 
+  const LAYER_COPY = {
+    graha: {
+      title: "Graha",
+      hint: "Nine grahas · tap one for arrow guide",
+    },
+    nakshatra: {
+      title: "Nakṣatra",
+      hint: "27 lunar mansions on the ecliptic",
+    },
+    rasi: {
+      title: "Zodiac · Rāśi",
+      hint: "12 rāśis · sidereal (Lahiri)",
+    },
+    iss: {
+      title: "ISS",
+      hint: "International Space Station · live",
+    },
+  };
+
+  function objectsForActiveLayer() {
+    let items = state.objects.filter((o) => o.kind === state.activeLayer);
+    if (state.onlyAbove) {
+      items = items.filter((o) => o.alt >= -1);
+      // If everything filtered out, still show below-horizon so user sees list
+      if (!items.length) {
+        items = state.objects.filter((o) => o.kind === state.activeLayer);
+      }
+    }
+    // Sort: above first, then closest to aim, then by name
+    items = items.slice().sort((a, b) => {
+      const au = a.alt >= 0 ? 0 : 1;
+      const bu = b.alt >= 0 ? 0 : 1;
+      if (au !== bu) return au - bu;
+      if (state.heading != null && state.pitch != null) {
+        const da = Math.hypot(deltaAngle(state.heading, a.az), a.alt - state.pitch);
+        const db = Math.hypot(deltaAngle(state.heading, b.az), b.alt - state.pitch);
+        return da - db;
+      }
+      return a.label.localeCompare(b.label);
+    });
+    return items;
+  }
+
+  function updateLayerChrome() {
+    const copy = LAYER_COPY[state.activeLayer] || LAYER_COPY.graha;
+    if (els.listTitle) els.listTitle.textContent = copy.title;
+    if (els.layerHint) els.layerHint.textContent = copy.hint;
+
+    els.layerTabs?.forEach((tab) => {
+      const layer = tab.getAttribute("data-layer");
+      const on = layer === state.activeLayer;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+
+    // Counts on tabs (above horizon)
+    ["graha", "nakshatra", "rasi", "iss"].forEach((kind) => {
+      const n = state.objects.filter((o) => o.kind === kind && o.alt >= 0).length;
+      const total = state.objects.filter((o) => o.kind === kind).length;
+      const el = document.querySelector('[data-count-for="' + kind + '"]');
+      if (el) el.textContent = total ? n + "/" + total : "—";
+    });
+  }
+
   function updateObjectList() {
     if (!els.objectList) return;
-    const chips = els.objectList.querySelectorAll(".planet-chip");
-    // Rebuild if count/kind filter changed
-    const visible = state.objects.filter((o) => {
-      if (o.kind === "graha") return state.layers.graha;
-      if (o.kind === "nakshatra") return state.layers.nakshatra;
-      if (o.kind === "rasi") return state.layers.rasi;
-      if (o.kind === "iss") return state.layers.iss;
-      return true;
-    });
+    updateLayerChrome();
 
-    // Only list: all grahas, ISS, rasis; nakshatras above horizon or all if few
-    const listItems = visible.filter((o) => {
-      if (o.kind === "nakshatra") return o.alt > -5;
-      return true;
-    });
+    const items = objectsForActiveLayer();
+    const cards = els.objectList.querySelectorAll(".obj-card");
 
-    if (chips.length !== listItems.length) {
-      buildObjectList(listItems);
+    if (cards.length !== items.length) {
+      buildObjectList(items);
       return;
     }
-    listItems.forEach((obj, i) => {
-      const chip = chips[i];
-      if (!chip || chip.dataset.id !== obj.id) {
-        buildObjectList(listItems);
-        return;
-      }
-      const meta = chip.querySelector(".meta");
+
+    let mismatch = false;
+    items.forEach((obj, i) => {
+      if (!cards[i] || cards[i].dataset.id !== obj.id) mismatch = true;
+    });
+    if (mismatch) {
+      buildObjectList(items);
+      return;
+    }
+
+    const aboveN = items.filter((o) => o.alt >= 0).length;
+    if (els.listMeta) {
+      els.listMeta.textContent =
+        aboveN + " up · " + items.length + " listed · tap to guide";
+    }
+
+    items.forEach((obj, i) => {
+      const card = cards[i];
+      const meta = card.querySelector(".meta");
       const p = project(obj);
-      chip.classList.toggle("below", obj.alt < 0);
-      chip.classList.toggle("selected", state.targetId === obj.id);
-      chip.classList.toggle("in-view", !!(p && p.inFov && obj.alt > -1));
+      card.classList.toggle("below", obj.alt < 0);
+      card.classList.toggle("selected", state.targetId === obj.id);
+      card.classList.toggle("in-view", !!(p && p.inFov && obj.alt > -1));
       if (meta) {
         meta.textContent =
           (obj.alt < 0 ? "Below · " : obj.alt.toFixed(0) + "° · ") +
           compassLabel(obj.az) +
-          (p && state.heading != null ? " · " + p.angDist.toFixed(0) + "°" : "");
+          (p && state.heading != null ? " · " + p.angDist.toFixed(0) + "° off" : "");
       }
     });
   }
 
   function buildObjectList(items) {
     if (!els.objectList) return;
-    if (!items) {
-      items = state.objects.filter((o) => {
-        if (o.kind === "nakshatra") return o.alt > -5 && state.layers.nakshatra;
-        if (o.kind === "graha") return state.layers.graha;
-        if (o.kind === "rasi") return state.layers.rasi;
-        if (o.kind === "iss") return state.layers.iss;
-        return true;
-      });
+    if (!items) items = objectsForActiveLayer();
+    updateLayerChrome();
+
+    const aboveN = items.filter((o) => o.alt >= 0).length;
+    if (els.listMeta) {
+      els.listMeta.textContent =
+        items.length
+          ? aboveN + " up · " + items.length + " listed · tap to guide"
+          : "Nothing to show";
     }
+
     els.objectList.innerHTML = "";
     for (const obj of items) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "planet-chip kind-" + obj.kind;
+      btn.className = "obj-card kind-" + obj.kind;
       btn.dataset.id = obj.id;
+      btn.setAttribute("role", "option");
       btn.innerHTML =
         '<span class="name"><span class="dot" style="background:' +
         obj.color +
-        '"></span>' +
+        '"></span><span class="name-text">' +
         obj.label +
-        '</span><span class="kind-tag">' +
-        obj.kind +
-        '</span><span class="meta">—</span>';
+        '</span></span>' +
+        (obj.sub ? '<span class="sub">' + obj.sub + "</span>" : "") +
+        '<span class="meta">—</span>';
       btn.addEventListener("click", () => {
         state.targetId = state.targetId === obj.id ? null : obj.id;
+        // If target is in another layer somehow, switch — usually same layer
+        if (state.targetId && obj.kind !== state.activeLayer) {
+          setActiveLayer(obj.kind);
+        }
         updateGuide();
         updateObjectList();
       });
@@ -1070,17 +1142,34 @@
     }
   }
 
+  function setActiveLayer(layer) {
+    if (!LAYER_COPY[layer]) return;
+    state.activeLayer = layer;
+    // Clear target when switching layers unless it belongs to new layer
+    if (state.targetId) {
+      const t = state.objects.find((o) => o.id === state.targetId);
+      if (!t || t.kind !== layer) {
+        state.targetId = null;
+      }
+    }
+    if (layer === "iss") refreshISS(true).catch(() => {});
+    updateGuide();
+    buildObjectList();
+  }
+
   function updateDebug() {
     if (!els.debugLine) return;
     const fov = viewFov();
     const iss =
-      state.iss && state.layers.iss
+      state.iss
         ? " · ISS " + state.iss.alt.toFixed(0) + "°"
         : state.issError
           ? " · ISS err"
           : "";
     els.debugLine.textContent =
-      "hdg " +
+      "layer " +
+      state.activeLayer +
+      " · hdg " +
       (state.heading != null ? state.heading.toFixed(1) : "—") +
       "° · elev " +
       (state.pitch != null ? state.pitch.toFixed(1) : "—") +
@@ -1238,20 +1327,6 @@
     }
   }
 
-  function syncLayerButtons() {
-    els.layerBtns?.forEach((btn) => {
-      const layer = btn.getAttribute("data-layer");
-      btn.setAttribute("aria-pressed", state.layers[layer] ? "true" : "false");
-      btn.classList.toggle("active", !!state.layers[layer]);
-    });
-    if (els.listTitle) {
-      const on = Object.entries(state.layers)
-        .filter(([, v]) => v)
-        .map(([k]) => k);
-      els.listTitle.textContent = "Find · " + (on.join(" · ") || "none");
-    }
-  }
-
   function init() {
     try {
       resizeCanvas();
@@ -1297,18 +1372,16 @@
     });
     els.btnCalibrate?.addEventListener("click", calibrateToAim);
 
-    els.layerBtns?.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const layer = btn.getAttribute("data-layer");
-        state.layers[layer] = !state.layers[layer];
-        // Keep at least one layer on
-        if (!Object.values(state.layers).some(Boolean)) state.layers[layer] = true;
-        syncLayerButtons();
-        computeSky();
-        buildObjectList();
+    els.layerTabs?.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        setActiveLayer(tab.getAttribute("data-layer"));
       });
     });
-    syncLayerButtons();
+    els.onlyAbove?.addEventListener("change", () => {
+      state.onlyAbove = !!els.onlyAbove.checked;
+      buildObjectList();
+    });
+    updateLayerChrome();
 
     els.headingOffset?.addEventListener("input", () => {
       const v = Number(els.headingOffset.value) || 0;

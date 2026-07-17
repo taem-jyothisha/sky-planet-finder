@@ -119,50 +119,7 @@ html, body {
   min-width: 4.5rem;
   white-space: nowrap;
 }
-.layer-bar {
-  position: absolute;
-  left: 50%;
-  top: calc(5.6rem + var(--safe-t));
-  transform: translateX(-50%);
-  z-index: 22;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.3rem;
-  max-width: 96vw;
-  pointer-events: auto;
-}
-.layer-btn {
-  border: 1px solid var(--line);
-  background: rgba(0,0,0,0.5);
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.32rem 0.55rem;
-  border-radius: 999px;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.layer-btn.active {
-  color: #0a1020;
-  background: linear-gradient(135deg, #cfe3ff, #7eb6ff);
-  border-color: transparent;
-}
-.planet-chip .kind-tag {
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--pebble, #9aa8c7);
-  opacity: 0.85;
-}
-.planet-chip.kind-iss {
-  border-color: rgba(109, 255, 168, 0.45);
-}
-.planet-chip.kind-nakshatra .name { font-size: 0.8rem; }
-.planet-chip.kind-rasi .dot { border-radius: 2px; }
+/* Layer tabs live in the bottom sheet */
 .head-actions { display: flex; gap: 0.35rem; align-items: center; }
 .debug-line {
   margin: 0;
@@ -327,28 +284,42 @@ html, body {
   right: 0;
   bottom: 0;
   z-index: 25;
-  padding: 0.85rem 0.9rem calc(0.85rem + var(--safe-b));
-  background: linear-gradient(180deg, transparent, rgba(5,8,20,0.55) 12%, var(--card) 38%);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  padding: 0.45rem 0.75rem calc(0.65rem + var(--safe-b));
+  background: rgba(8, 12, 28, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border-top: 1px solid var(--line);
-  max-height: 46vh;
+  border-radius: 1.15rem 1.15rem 0 0;
+  max-height: 52vh;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.45rem;
   pointer-events: auto;
+  box-shadow: 0 -12px 40px rgba(0,0,0,0.4);
 }
-
+.sheet-grab {
+  width: 2.4rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+  margin: 0.15rem auto 0.1rem;
+}
 .sheet-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
 }
 .sheet-head h1 {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 1rem;
+  font-weight: 750;
+}
+.layer-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 500;
 }
 .text-btn {
   border: 0;
@@ -362,63 +333,177 @@ html, body {
 }
 .text-btn.hidden { display: none; }
 
-.planet-list {
-  display: flex;
-  gap: 0.45rem;
-  overflow-x: auto;
-  padding: 0.15rem 0 0.35rem;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+/* Layer tabs */
+.layer-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.35rem;
 }
-.planet-list::-webkit-scrollbar { display: none; }
+.layer-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.45rem 0.2rem 0.4rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.layer-tab .tab-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.layer-tab .tab-label {
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+.layer-tab .tab-count {
+  font-size: 0.6rem;
+  font-weight: 700;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.layer-tab.active {
+  color: #0a1020;
+  background: linear-gradient(160deg, #d7e8ff, #7eb6ff 70%);
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(126, 182, 255, 0.28);
+}
+.layer-tab.active .tab-count { opacity: 0.9; }
 
-.planet-chip {
-  flex: 0 0 auto;
+.list-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.1rem;
+}
+.check-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.check-tool input { accent-color: var(--accent); }
+.list-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Vertical scrollable grid — not a horizontal line */
+.object-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 28vh;
+  padding: 0.1rem 0 0.2rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.object-grid:empty::after {
+  content: "Nothing in this layer right now";
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  padding: 1rem 0.5rem;
+}
+
+.obj-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.15rem;
-  min-width: 5.6rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 0.9rem;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.85rem;
   border: 1px solid var(--line);
   background: rgba(255,255,255,0.04);
   color: var(--text);
   font: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+  transition: border-color 0.12s, background 0.12s, transform 0.1s;
 }
-.planet-chip:active { transform: scale(0.97); }
-.planet-chip .name {
-  font-size: 0.88rem;
-  font-weight: 700;
+.obj-card:active { transform: scale(0.98); }
+.obj-card .name {
+  font-size: 0.86rem;
+  font-weight: 750;
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
 }
-.planet-chip .dot {
+.obj-card .name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obj-card .dot {
+  flex: 0 0 auto;
   width: 0.55rem;
   height: 0.55rem;
   border-radius: 50%;
   box-shadow: 0 0 8px currentColor;
 }
-.planet-chip .meta {
-  font-size: 0.68rem;
+.obj-card.kind-rasi .dot { border-radius: 2px; }
+.obj-card .sub {
+  font-size: 0.66rem;
   color: var(--muted);
   font-weight: 500;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.planet-chip.below {
-  opacity: 0.45;
+.obj-card .meta {
+  font-size: 0.68rem;
+  color: var(--accent);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
-.planet-chip.selected {
+.obj-card.below {
+  opacity: 0.48;
+}
+.obj-card.below .meta { color: var(--muted); }
+.obj-card.selected {
   border-color: var(--accent-2);
-  background: rgba(255, 210, 122, 0.12);
-  box-shadow: 0 0 0 1px rgba(255, 210, 122, 0.25);
+  background: rgba(255, 210, 122, 0.14);
+  box-shadow: 0 0 0 1px rgba(255, 210, 122, 0.28);
 }
-.planet-chip.in-view:not(.selected) {
+.obj-card.in-view:not(.selected) {
   border-color: rgba(126, 182, 255, 0.55);
 }
+.obj-card.kind-iss {
+  grid-column: 1 / -1;
+  border-color: rgba(109, 255, 168, 0.4);
+}
+.more-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+}
+.more-panel summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted);
+  list-style: none;
+  padding: 0.2rem 0;
+}
+.more-panel summary::-webkit-details-marker { display: none; }
+.more-panel[open] summary { margin-bottom: 0.4rem; }
 
 .sheet-foot {
   display: flex;

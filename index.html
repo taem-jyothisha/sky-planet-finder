@@ -8,10 +8,10 @@
   <meta name="apple-mobile-web-app-title" content="Sky" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#050814" />
-  <meta name="description" content="Find grahas, nakshatras, rasis and the ISS with your iPhone camera." />
+  <meta name="description" content="Find grahas, nakshatras, zodiac and the ISS with your iPhone camera." />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <title>Sky · Graha · Nakṣatra · ISS</title>
+  <title>Sky · Layers</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -39,14 +39,6 @@
       <span id="zoomVal" class="zoom-val">1×</span>
     </div>
 
-    <!-- Layer toggles -->
-    <div class="layer-bar" role="group" aria-label="Sky layers">
-      <button type="button" class="layer-btn active" data-layer="graha" aria-pressed="true">Graha</button>
-      <button type="button" class="layer-btn active" data-layer="nakshatra" aria-pressed="true">Nakṣatra</button>
-      <button type="button" class="layer-btn active" data-layer="rasi" aria-pressed="true">Rāśi</button>
-      <button type="button" class="layer-btn active" data-layer="iss" aria-pressed="true">ISS</button>
-    </div>
-
     <div class="crosshair" aria-hidden="true">
       <span class="ring"></span>
       <span class="dot"></span>
@@ -70,37 +62,79 @@
     <div id="pointingHud" class="pointing-hud">
       <div class="hud-label">Looking toward</div>
       <div id="pointingMain" class="hud-main">—</div>
-      <div id="pointingSub" class="hud-sub">Graha · nakṣatra · rāśi · ISS</div>
+      <div id="pointingSub" class="hud-sub">Pick a layer below</div>
     </div>
 
-    <footer class="bottom-sheet">
+    <!-- Bottom: layer tabs + list for active layer only -->
+    <footer class="bottom-sheet" id="bottomSheet">
+      <div class="sheet-grab" aria-hidden="true"></div>
+
       <div class="sheet-head">
-        <h1 id="listTitle">Find · graha · nakṣatra · rāśi · ISS</h1>
+        <div>
+          <h1 id="listTitle">Layers</h1>
+          <p id="layerHint" class="layer-hint">Grahas in the sky right now</p>
+        </div>
         <div class="head-actions">
           <button type="button" id="btnCalibrate" class="text-btn">Calibrate</button>
           <button type="button" id="btnClearTarget" class="text-btn hidden">Clear</button>
         </div>
       </div>
-      <div id="objectList" class="planet-list" role="listbox" aria-label="Sky objects"></div>
-      <div class="sheet-foot">
-        <label class="calib">
-          Compass
-          <input type="range" id="headingOffset" min="-45" max="45" value="0" />
-          <span id="headingOffsetVal">0°</span>
-        </label>
-        <label class="calib">
-          Elev
-          <input type="range" id="pitchOffset" min="-30" max="30" value="0" />
-          <span id="pitchOffsetVal">0°</span>
-        </label>
-        <button type="button" id="btnStart" class="primary-btn">Start sky view</button>
+
+      <!-- Primary layer switcher -->
+      <div class="layer-tabs" role="tablist" aria-label="Sky layers">
+        <button type="button" class="layer-tab active" role="tab" data-layer="graha" aria-selected="true">
+          <span class="tab-icon">☉</span>
+          <span class="tab-label">Graha</span>
+          <span class="tab-count" data-count-for="graha">9</span>
+        </button>
+        <button type="button" class="layer-tab" role="tab" data-layer="nakshatra" aria-selected="false">
+          <span class="tab-icon">✦</span>
+          <span class="tab-label">Nakṣatra</span>
+          <span class="tab-count" data-count-for="nakshatra">27</span>
+        </button>
+        <button type="button" class="layer-tab" role="tab" data-layer="rasi" aria-selected="false">
+          <span class="tab-icon">♈</span>
+          <span class="tab-label">Zodiac</span>
+          <span class="tab-count" data-count-for="rasi">12</span>
+        </button>
+        <button type="button" class="layer-tab" role="tab" data-layer="iss" aria-selected="false">
+          <span class="tab-icon">🛰</span>
+          <span class="tab-label">ISS</span>
+          <span class="tab-count" data-count-for="iss">1</span>
+        </button>
       </div>
-      <p id="debugLine" class="debug-line">—</p>
-      <p class="disclaimer">
-        Sidereal labels use <strong>Lahiri</strong> ayanāṃśa. Rāśi/nakṣatra markers sit on the ecliptic.
-        ISS from live orbit feed. Center Moon → <strong>Calibrate</strong> if compass drifts.
-        Pinch or 0.5/1/2/5× to zoom.
-      </p>
+
+      <div class="list-tools">
+        <label class="check-tool">
+          <input type="checkbox" id="onlyAbove" checked />
+          Above horizon
+        </label>
+        <span id="listMeta" class="list-meta">—</span>
+      </div>
+
+      <div id="objectList" class="object-grid" role="listbox" aria-label="Objects in layer"></div>
+
+      <details class="more-panel">
+        <summary>Compass trim · elevation · start</summary>
+        <div class="sheet-foot">
+          <label class="calib">
+            Compass
+            <input type="range" id="headingOffset" min="-45" max="45" value="0" />
+            <span id="headingOffsetVal">0°</span>
+          </label>
+          <label class="calib">
+            Elev
+            <input type="range" id="pitchOffset" min="-30" max="30" value="0" />
+            <span id="pitchOffsetVal">0°</span>
+          </label>
+          <button type="button" id="btnStart" class="primary-btn">Start sky view</button>
+        </div>
+        <p id="debugLine" class="debug-line">—</p>
+        <p class="disclaimer">
+          One layer at a time on the camera. Sidereal names use <strong>Lahiri</strong>.
+          Center the Moon → <strong>Calibrate</strong> if labels drift. Pinch to zoom.
+        </p>
+      </details>
     </footer>
 
     <div id="gate" class="gate">
@@ -108,9 +142,8 @@
         <div class="gate-icon">☾</div>
         <h2>Sky guide</h2>
         <p>
-          Point your iPhone to find <strong>grahas</strong> (incl. Rāhu/Ketu),
-          <strong>nakṣatras</strong>, <strong>rāśis</strong>, and the <strong>ISS</strong>
-          with arrows and live camera overlays.
+          Switch <strong>layers</strong>: Graha, Nakṣatra, Zodiac (rāśi), or ISS —
+          then tap an object for arrow guidance on camera.
         </p>
         <ul class="gate-needs">
           <li>Rear camera + zoom</li>
@@ -118,21 +151,16 @@
           <li>Motion / compass</li>
         </ul>
         <p class="ios-hint">
-          Safari · Location Services → Precise On · wave phone in a figure‑8 after start.
-          Toggle layers: Graha · Nakṣatra · Rāśi · ISS.
+          Safari · Precise Location On · Allow Camera, then Location, then Motion.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
-        <p class="ios-hint" style="margin-top:0.75rem">
-          When prompted, tap <strong>Allow</strong> for Camera first, then Location, then Motion.
-          If nothing happens, force-close Safari and open the link again.
-        </p>
         <p id="gateError" class="error" hidden></p>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-  <script src="astro-extras.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="astro-extras.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
