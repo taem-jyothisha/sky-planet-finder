@@ -11,7 +11,7 @@
   <meta name="description" content="Find grahas, nakshatras, zodiac and the ISS with your iPhone camera." />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <title>Sky · Layers</title>
+  <title>Sky</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -32,20 +32,18 @@
 
     <div class="zoom-bar" aria-label="Zoom">
       <button type="button" class="zoom-btn" data-zoom="0.5">0.5</button>
-      <button type="button" class="zoom-btn active" data-zoom="1">1×</button>
-      <button type="button" class="zoom-btn" data-zoom="2">2×</button>
-      <button type="button" class="zoom-btn" data-zoom="5">5×</button>
-      <input type="range" id="zoomSlider" min="0.5" max="8" step="0.1" value="1" aria-label="Zoom slider" />
+      <button type="button" class="zoom-btn active" data-zoom="1">1</button>
+      <button type="button" class="zoom-btn" data-zoom="2">2</button>
+      <button type="button" class="zoom-btn" data-zoom="5">5</button>
       <span id="zoomVal" class="zoom-val">1×</span>
+      <input type="range" id="zoomSlider" min="0.5" max="8" step="0.1" value="1" aria-label="Zoom" />
     </div>
 
-    <!-- Optical center — must match projection origin -->
     <div class="crosshair" aria-hidden="true">
       <span class="ring"></span>
       <span class="dot"></span>
     </div>
 
-    <!-- Edge direction cues (clearer than a spinning arrow) -->
     <div id="edgeLeft" class="edge-cue edge-left" aria-hidden="true">◀</div>
     <div id="edgeRight" class="edge-cue edge-right" aria-hidden="true">▶</div>
     <div id="edgeUp" class="edge-cue edge-up" aria-hidden="true">▲</div>
@@ -63,106 +61,119 @@
     </div>
 
     <div id="alignBanner" class="align-banner hidden">
-      <p>
-        <strong>Align:</strong> put the <em>real</em> Moon (or selected graha) in the crosshair,
-        then tap <strong>Align</strong> below. Fixes compass / tilt mismatch.
-      </p>
+      <p><strong>Align:</strong> put the real object in the crosshair, then tap Align.</p>
       <button type="button" id="btnAlignQuick" class="primary-btn">Align now</button>
     </div>
 
+    <!-- Compact look-at pill (not a big HUD) -->
     <div id="pointingHud" class="pointing-hud">
-      <div class="hud-label">Looking toward</div>
       <div id="pointingMain" class="hud-main">—</div>
-      <div id="pointingSub" class="hud-sub">Pick a layer · Align once for accuracy</div>
+      <div id="pointingSub" class="hud-sub">—</div>
     </div>
 
-    <!-- Bottom: layer tabs + list for active layer only -->
-    <footer class="bottom-sheet" id="bottomSheet">
-      <div class="sheet-grab" aria-hidden="true"></div>
+    <!-- Google Maps–style floating controls -->
+    <div class="map-controls" id="mapControls">
+      <button type="button" id="btnLayers" class="fab" aria-expanded="false" aria-controls="layerPanel">
+        <span class="fab-icon">☰</span>
+        <span class="fab-text">Layers</span>
+      </button>
+      <button type="button" id="btnFind" class="fab ghost" aria-expanded="false" aria-controls="findPanel">
+        <span class="fab-icon">◎</span>
+        <span class="fab-text" id="findFabLabel">Find</span>
+      </button>
+      <button type="button" id="btnCalibrate" class="fab ghost">
+        <span class="fab-icon">⌖</span>
+        <span class="fab-text">Align</span>
+      </button>
+    </div>
 
-      <div class="sheet-head">
+    <!-- Layer panel (Maps-style card) -->
+    <div id="layerPanel" class="map-panel hidden" role="dialog" aria-label="Map layers">
+      <div class="map-panel-head">
+        <strong>Map type</strong>
+        <button type="button" class="icon-x" id="btnCloseLayers" aria-label="Close">✕</button>
+      </div>
+      <div class="layer-cards">
+        <button type="button" class="layer-card active" data-layer="graha">
+          <span class="lc-icon">☉</span>
+          <span class="lc-name">Graha</span>
+          <span class="lc-desc">Planets · Rāhu · Ketu</span>
+        </button>
+        <button type="button" class="layer-card" data-layer="nakshatra">
+          <span class="lc-icon">✦</span>
+          <span class="lc-name">Nakṣatra</span>
+          <span class="lc-desc">27 lunar mansions</span>
+        </button>
+        <button type="button" class="layer-card" data-layer="rasi">
+          <span class="lc-icon">♈</span>
+          <span class="lc-name">Zodiac</span>
+          <span class="lc-desc">12 rāśis</span>
+        </button>
+        <button type="button" class="layer-card" data-layer="iss">
+          <span class="lc-icon">🛰</span>
+          <span class="lc-name">ISS</span>
+          <span class="lc-desc">Space station</span>
+        </button>
+      </div>
+      <label class="check-tool panel-check">
+        <input type="checkbox" id="onlyAbove" checked />
+        Only above horizon in list
+      </label>
+    </div>
+
+    <!-- Find panel: object list for active layer (slides up, not full screen) -->
+    <div id="findPanel" class="find-panel hidden">
+      <div class="find-grab" id="findGrab"></div>
+      <div class="find-head">
         <div>
-          <h1 id="listTitle">Layers</h1>
-          <p id="layerHint" class="layer-hint">Grahas in the sky right now</p>
+          <h1 id="listTitle">Graha</h1>
+          <p id="layerHint" class="layer-hint">Tap to guide</p>
         </div>
         <div class="head-actions">
-          <button type="button" id="btnCalibrate" class="text-btn">Align</button>
           <button type="button" id="btnClearTarget" class="text-btn hidden">Clear</button>
+          <button type="button" id="btnCloseFind" class="icon-x" aria-label="Close">✕</button>
         </div>
       </div>
+      <p id="listMeta" class="list-meta">—</p>
+      <div id="objectList" class="object-grid" role="listbox" aria-label="Objects"></div>
+    </div>
 
-      <!-- Primary layer switcher -->
-      <div class="layer-tabs" role="tablist" aria-label="Sky layers">
-        <button type="button" class="layer-tab active" role="tab" data-layer="graha" aria-selected="true">
-          <span class="tab-icon">☉</span>
-          <span class="tab-label">Graha</span>
-          <span class="tab-count" data-count-for="graha">9</span>
-        </button>
-        <button type="button" class="layer-tab" role="tab" data-layer="nakshatra" aria-selected="false">
-          <span class="tab-icon">✦</span>
-          <span class="tab-label">Nakṣatra</span>
-          <span class="tab-count" data-count-for="nakshatra">27</span>
-        </button>
-        <button type="button" class="layer-tab" role="tab" data-layer="rasi" aria-selected="false">
-          <span class="tab-icon">♈</span>
-          <span class="tab-label">Zodiac</span>
-          <span class="tab-count" data-count-for="rasi">12</span>
-        </button>
-        <button type="button" class="layer-tab" role="tab" data-layer="iss" aria-selected="false">
-          <span class="tab-icon">🛰</span>
-          <span class="tab-label">ISS</span>
-          <span class="tab-count" data-count-for="iss">1</span>
-        </button>
-      </div>
+    <!-- Mini bar when guiding (sheet faded away) -->
+    <div id="guideDock" class="guide-dock hidden">
+      <button type="button" id="btnDockExpand" class="dock-main">
+        <span id="dockTarget">—</span>
+        <span id="dockHint" class="dock-hint">Guiding</span>
+      </button>
+      <button type="button" id="btnDockClear" class="dock-clear" aria-label="Clear">✕</button>
+      <button type="button" id="btnDockLayers" class="dock-layers" aria-label="Layers">☰</button>
+    </div>
 
-      <div class="list-tools">
-        <label class="check-tool">
-          <input type="checkbox" id="onlyAbove" checked />
-          Above horizon
+    <!-- Settings tucked away -->
+    <details class="settings-float" id="settingsFloat">
+      <summary>⋯</summary>
+      <div class="settings-body">
+        <label class="calib">
+          Compass
+          <input type="range" id="headingOffset" min="-60" max="60" value="0" />
+          <span id="headingOffsetVal">0°</span>
         </label>
-        <span id="listMeta" class="list-meta">—</span>
-      </div>
-
-      <div id="objectList" class="object-grid" role="listbox" aria-label="Objects in layer"></div>
-
-      <details class="more-panel">
-        <summary>Compass trim · elevation · start</summary>
-        <div class="sheet-foot">
-          <label class="calib">
-            Compass
-            <input type="range" id="headingOffset" min="-45" max="45" value="0" />
-            <span id="headingOffsetVal">0°</span>
-          </label>
-          <label class="calib">
-            Elev
-            <input type="range" id="pitchOffset" min="-30" max="30" value="0" />
-            <span id="pitchOffsetVal">0°</span>
-          </label>
-          <button type="button" id="btnStart" class="primary-btn">Start sky view</button>
-        </div>
+        <label class="calib">
+          Elev
+          <input type="range" id="pitchOffset" min="-40" max="40" value="0" />
+          <span id="pitchOffsetVal">0°</span>
+        </label>
+        <button type="button" id="btnStart" class="primary-btn">Restart sensors</button>
         <p id="debugLine" class="debug-line">—</p>
-        <p class="disclaimer">
-          One layer at a time on the camera. Sidereal names use <strong>Lahiri</strong>.
-          Center the Moon → <strong>Calibrate</strong> if labels drift. Pinch to zoom.
-        </p>
-      </details>
-    </footer>
+      </div>
+    </details>
 
     <div id="gate" class="gate">
       <div class="gate-card">
         <div class="gate-icon">☾</div>
-        <h2>Sky guide</h2>
+        <h2>Sky</h2>
         <p>
-          Switch <strong>layers</strong>: Graha, Nakṣatra, Zodiac (rāśi), or ISS —
-          then tap an object for arrow guidance on camera.
-        </p>
-        <ul class="gate-needs">
-          <li>Rear camera + zoom</li>
-          <li>Precise Location</li>
-          <li>Motion / compass</li>
-        </ul>
-        <p class="ios-hint">
-          Safari · Precise Location On · Allow Camera, then Location, then Motion.
+          Camera overlays for grahas, nakṣatras, zodiac &amp; ISS.
+          Layers work like Maps — pick a layer, then a target.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
         <p id="gateError" class="error" hidden></p>
@@ -171,7 +182,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-  <script src="astro-extras.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="astro-extras.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

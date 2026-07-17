@@ -20,9 +20,24 @@
     btnStart: $("btnStart"),
     btnClearTarget: $("btnClearTarget"),
     btnCalibrate: $("btnCalibrate"),
+    btnLayers: $("btnLayers"),
+    btnFind: $("btnFind"),
+    btnCloseLayers: $("btnCloseLayers"),
+    btnCloseFind: $("btnCloseFind"),
+    btnDockExpand: $("btnDockExpand"),
+    btnDockClear: $("btnDockClear"),
+    btnDockLayers: $("btnDockLayers"),
+    mapControls: $("mapControls"),
+    layerPanel: $("layerPanel"),
+    findPanel: $("findPanel"),
+    guideDock: $("guideDock"),
+    dockTarget: $("dockTarget"),
+    dockHint: $("dockHint"),
+    findFabLabel: $("findFabLabel"),
     statusChip: $("statusChip"),
     locChip: $("locChip"),
     objectList: $("objectList"),
+    pointingHud: $("pointingHud"),
     pointingMain: $("pointingMain"),
     pointingSub: $("pointingSub"),
     guidePanel: $("guidePanel"),
@@ -45,7 +60,7 @@
     zoomBtns: document.querySelectorAll("[data-zoom]"),
     zoomSlider: $("zoomSlider"),
     debugLine: $("debugLine"),
-    layerTabs: document.querySelectorAll(".layer-tab[data-layer]"),
+    layerCards: document.querySelectorAll(".layer-card[data-layer]"),
     listTitle: $("listTitle"),
     layerHint: $("layerHint"),
     listMeta: $("listMeta"),
@@ -79,6 +94,9 @@
     activeLayer: "graha",
     onlyAbove: true,
     running: false,
+    /** UI: layers panel / find panel open */
+    layersOpen: false,
+    findOpen: false,
     orientReady: false,
     lastBodyCompute: 0,
     lastIssFetch: 0,
@@ -759,9 +777,9 @@
     const p = pad || 28;
     const cx = w / 2;
     const cy = h / 2;
-    // Usable rect (above bottom sheet ~52vh → keep markers in upper ~55%)
-    const top = p + 40;
-    const bottom = h * 0.52;
+    // Leave room for zoom bar / floating fabs only
+    const top = p + 56;
+    const bottom = h - (p + 72);
     const left = p;
     const right = w - p;
 
@@ -813,13 +831,14 @@
     let nearest = null;
     let nearestPointlike = null;
 
-    // Only draw the active layer (+ keep selected target if any)
+    // Always overlay active layer on camera (+ selected target)
     const drawList = state.objects.filter(
       (o) => o.kind === state.activeLayer || o.id === state.targetId
     );
 
     for (const obj of drawList) {
-      if (obj.alt < -12 && obj.id !== state.targetId) continue;
+      // Keep near-horizon objects; only skip deep below unless selected
+      if (obj.alt < -8 && obj.id !== state.targetId) continue;
       const p = project(obj);
       if (!p) continue;
 
@@ -832,13 +851,11 @@
       }
 
       const isTarget = obj.id === state.targetId;
+      // Show everything in/near the viewfinder — overlays must feel dense like a sky map
       const drawIt =
         isTarget ||
         p.inFov ||
-        (obj.kind === "graha" && p.angDist < 30) ||
-        (obj.kind === "iss" && p.angDist < 40) ||
-        (obj.kind === "rasi" && p.angDist < 22) ||
-        (obj.kind === "nakshatra" && p.angDist < 16);
+        p.angDist < (obj.kind === "nakshatra" ? 22 : obj.kind === "rasi" ? 28 : 40);
 
       if (!drawIt) continue;
 
@@ -937,7 +954,8 @@
     drawRadar(w, h);
     updateHud(nearestPointlike || nearest);
     updateGuide();
-    updateObjectList();
+    if (state.findOpen) updateObjectList();
+    else updateLayerChrome();
     updateDebug();
   }
 
@@ -1182,6 +1200,10 @@
         "°";
     if (els.guideDelta)
       els.guideDelta.textContent = p.angDist.toFixed(0) + "° from crosshair";
+
+    if (els.dockHint && state.targetId) {
+      els.dockHint.textContent = p.angDist.toFixed(0) + "° away · tap to list";
+    }
   }
 
   const LAYER_COPY = {
@@ -1231,21 +1253,61 @@
     const copy = LAYER_COPY[state.activeLayer] || LAYER_COPY.graha;
     if (els.listTitle) els.listTitle.textContent = copy.title;
     if (els.layerHint) els.layerHint.textContent = copy.hint;
+    if (els.findFabLabel) {
+      els.findFabLabel.textContent =
+        state.activeLayer === "graha"
+          ? "Graha"
+          : state.activeLayer === "nakshatra"
+            ? "Nakṣatra"
+            : state.activeLayer === "rasi"
+              ? "Zodiac"
+              : "ISS";
+    }
 
-    els.layerTabs?.forEach((tab) => {
-      const layer = tab.getAttribute("data-layer");
-      const on = layer === state.activeLayer;
-      tab.classList.toggle("active", on);
-      tab.setAttribute("aria-selected", on ? "true" : "false");
+    els.layerCards?.forEach((card) => {
+      const layer = card.getAttribute("data-layer");
+      card.classList.toggle("active", layer === state.activeLayer);
     });
+  }
 
-    // Counts on tabs (above horizon)
-    ["graha", "nakshatra", "rasi", "iss"].forEach((kind) => {
-      const n = state.objects.filter((o) => o.kind === kind && o.alt >= 0).length;
-      const total = state.objects.filter((o) => o.kind === kind).length;
-      const el = document.querySelector('[data-count-for="' + kind + '"]');
-      if (el) el.textContent = total ? n + "/" + total : "—";
-    });
+  function setLayersOpen(open) {
+    state.layersOpen = !!open;
+    els.layerPanel?.classList.toggle("hidden", !open);
+    els.btnLayers?.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) setFindOpen(false);
+  }
+
+  function setFindOpen(open) {
+    state.findOpen = !!open;
+    els.findPanel?.classList.toggle("hidden", !open);
+    els.btnFind?.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      setLayersOpen(false);
+      buildObjectList();
+    }
+  }
+
+  /** When a target is selected, collapse panels (Maps-style clean view) */
+  function syncGuidingUi() {
+    const guiding = !!state.targetId && state.running;
+    document.body.classList.toggle("guiding", guiding);
+    if (guiding) {
+      setLayersOpen(false);
+      setFindOpen(false);
+      els.guideDock?.classList.remove("hidden");
+      els.pointingHud?.classList.add("dim");
+      const t = state.objects.find((o) => o.id === state.targetId);
+      if (els.dockTarget) els.dockTarget.textContent = t ? t.label : "Target";
+      if (els.dockHint) {
+        const p = t && project(t);
+        els.dockHint.textContent = p
+          ? p.angDist.toFixed(0) + "° away · tap to list"
+          : "Guiding · tap for list";
+      }
+    } else {
+      els.guideDock?.classList.add("hidden");
+      els.pointingHud?.classList.remove("dim");
+    }
   }
 
   function updateObjectList() {
@@ -1321,12 +1383,12 @@
         '<span class="meta">—</span>';
       btn.addEventListener("click", () => {
         state.targetId = state.targetId === obj.id ? null : obj.id;
-        // If target is in another layer somehow, switch — usually same layer
         if (state.targetId && obj.kind !== state.activeLayer) {
-          setActiveLayer(obj.kind);
+          state.activeLayer = obj.kind;
         }
         updateGuide();
         updateObjectList();
+        syncGuidingUi();
       });
       els.objectList.appendChild(btn);
     }
@@ -1335,16 +1397,17 @@
   function setActiveLayer(layer) {
     if (!LAYER_COPY[layer]) return;
     state.activeLayer = layer;
-    // Clear target when switching layers unless it belongs to new layer
     if (state.targetId) {
       const t = state.objects.find((o) => o.id === state.targetId);
-      if (!t || t.kind !== layer) {
-        state.targetId = null;
-      }
+      if (!t || t.kind !== layer) state.targetId = null;
     }
     if (layer === "iss") refreshISS(true).catch(() => {});
+    updateLayerChrome();
     updateGuide();
     buildObjectList();
+    syncGuidingUi();
+    // Keep overlays refreshing immediately
+    if (state.running) draw();
   }
 
   function updateDebug() {
@@ -1534,9 +1597,12 @@
       setStatus(
         notes.length
           ? "Live (partial) · " + notes.join(" · ")
-          : "Live · graha · nakṣatra · rāśi · ISS",
+          : "Live · Layers · Find",
         notes.length ? "warn" : "ok"
       );
+      // Show find list once so overlays + list are obvious
+      setFindOpen(true);
+      syncGuidingUi();
       requestAnimationFrame(tick);
     } catch (err) {
       console.error(err);
@@ -1596,24 +1662,51 @@
     } else if (!X()) {
       showGateError("Sky extras not loaded. Hard-refresh the page.");
     }
-    els.btnClearTarget?.addEventListener("click", () => {
+    const clearTarget = () => {
       state.targetId = null;
       updateGuide();
       updateObjectList();
-    });
+      syncGuidingUi();
+    };
+
+    els.btnClearTarget?.addEventListener("click", clearTarget);
+    els.btnDockClear?.addEventListener("click", clearTarget);
     els.btnCalibrate?.addEventListener("click", calibrateToAim);
     $("btnAlignQuick")?.addEventListener("click", calibrateToAim);
 
-    els.layerTabs?.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        setActiveLayer(tab.getAttribute("data-layer"));
+    els.btnLayers?.addEventListener("click", () => setLayersOpen(!state.layersOpen));
+    els.btnCloseLayers?.addEventListener("click", () => setLayersOpen(false));
+    els.btnFind?.addEventListener("click", () => setFindOpen(!state.findOpen));
+    els.btnCloseFind?.addEventListener("click", () => setFindOpen(false));
+    els.btnDockExpand?.addEventListener("click", () => setFindOpen(true));
+    els.btnDockLayers?.addEventListener("click", () => {
+      document.body.classList.remove("guiding");
+      setLayersOpen(true);
+    });
+
+    els.layerCards?.forEach((card) => {
+      card.addEventListener("click", () => {
+        setActiveLayer(card.getAttribute("data-layer"));
+        setLayersOpen(false);
+        setFindOpen(true);
       });
     });
     els.onlyAbove?.addEventListener("change", () => {
       state.onlyAbove = !!els.onlyAbove.checked;
       buildObjectList();
     });
+
+    // Tap empty sky (canvas) to re-open controls when guiding
+    els.canvas?.addEventListener("click", () => {
+      if (state.targetId) {
+        // brief reveal of map controls
+        els.mapControls?.classList.add("force-show");
+        setTimeout(() => els.mapControls?.classList.remove("force-show"), 2500);
+      }
+    });
+
     updateLayerChrome();
+    syncGuidingUi();
 
     els.headingOffset?.addEventListener("input", () => {
       const v = Number(els.headingOffset.value) || 0;
