@@ -310,72 +310,186 @@
     await withTimeout(run(), 12000, "Motion permission");
   }
 
+  function applyAim(headingRaw, pitchRaw, source) {
+    if (headingRaw == null || pitchRaw == null) return;
+    if (Number.isNaN(headingRaw) || Number.isNaN(pitchRaw)) return;
+
+    state.headingRaw = headingRaw;
+    state.pitchRaw = Math.max(-89, Math.min(89, pitchRaw));
+    state.orientSource = source || state.orientSource || "?";
+    state.orientReady = true;
+    state.lastOrientTs = performance.now();
+    state.orientEventCount = (state.orientEventCount || 0) + 1;
+
+    // Light smoothing only — must still track pan in real time
+    const hTarget = norm360(headingRaw + state.headingOffset);
+    const pTarget = state.pitchRaw + state.pitchOffset;
+    state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, 0.72);
+    state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, 0.72);
+    state.heading = state.smoothHeading;
+    state.pitch = state.smoothPitch;
+  }
+
   function onOrientation(e) {
     updateScreenAngle();
-    const beta = typeof e.beta === "number" ? e.beta : null;
-    const gamma = typeof e.gamma === "number" ? e.gamma : null;
-    const alpha = typeof e.alpha === "number" ? e.alpha : null;
-    if (beta == null || gamma == null) return;
+    state._gotOrientEvent = true;
 
-    // Absolute heading: prefer iOS webkitCompassHeading when present (true-ish north).
-    // Pitch / geometry: always from rotation matrix (rear camera −Z).
-    const aim = rearCameraAzAlt(
-      alpha != null ? alpha : 0,
-      beta,
-      gamma,
-      state.screenAngle
-    );
-
-    let heading;
-    if (
+    const beta = typeof e.beta === "number" && !Number.isNaN(e.beta) ? e.beta : null;
+    const gamma =
+      typeof e.gamma === "number" && !Number.isNaN(e.gamma) ? e.gamma : null;
+    const alpha =
+      typeof e.alpha === "number" && !Number.isNaN(e.alpha) ? e.alpha : null;
+    const compass =
       typeof e.webkitCompassHeading === "number" &&
-      !Number.isNaN(e.webkitCompassHeading) &&
-      // Compass is unreliable when pointed near zenith/nadir
-      Math.abs(aim.alt) < 75
-    ) {
-      // iOS compass is the device facing direction; for rear-camera sky use,
-      // with screen orientation compensation via matrix pitch only.
-      // When upright, webkitCompassHeading ≈ camera azimuth on iPhone.
-      heading = e.webkitCompassHeading;
-      // Landscape: top-of-device is not camera-forward — correct using screen angle
-      // empirically for rear camera viewfinder:
+      !Number.isNaN(e.webkitCompassHeading)
+        ? e.webkitCompassHeading
+        : null;
+
+    // Need at least tilt (beta) for pitch; gamma may be 0 (valid)
+    if (beta == null && gamma == null && compass == null && alpha == null) {
+      return;
+    }
+
+    const b = beta != null ? beta : state._lastBeta != null ? state._lastBeta : 90;
+    const g = gamma != null ? gamma : state._lastGamma != null ? state._lastGamma : 0;
+    if (beta != null) state._lastBeta = beta;
+    if (gamma != null) state._lastGamma = gamma;
+    if (alpha != null) state._lastAlpha = alpha;
+    if (compass != null) state._lastCompass = compass;
+
+    // LIVE tracking: prefer alpha+beta+gamma matrix (updates as you pan).
+    // iOS often freezes webkitCompassHeading — do NOT rely on it alone for motion.
+    let heading;
+    let pitch;
+    let source;
+
+    if (alpha != null) {
+      const aim = rearCameraAzAlt(alpha, b, g, state.screenAngle);
+      heading = aim.az;
+      pitch = aim.alt;
+      source = "matrix";
+
+      // Optional slow north correction from compass (doesn't freeze live motion)
+      if (compass != null && Math.abs(aim.alt) < 70) {
+        let c = compass;
+        if (state.screenAngle === 90) c = norm360(c + 90);
+        else if (state.screenAngle === -90 || state.screenAngle === 270)
+          c = norm360(c - 90);
+        else if (state.screenAngle === 180) c = norm360(c + 180);
+        // Blend 15% toward compass for absolute north, 85% live matrix
+        heading = norm360(heading + deltaAngle(heading, c) * 0.15);
+        source = "matrix+compass";
+      }
+    } else if (compass != null) {
+      // No alpha: iOS-style — compass for yaw, matrix pitch with last/0 alpha
+      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+      heading = compass;
       if (state.screenAngle === 90) heading = norm360(heading + 90);
       else if (state.screenAngle === -90 || state.screenAngle === 270)
         heading = norm360(heading - 90);
       else if (state.screenAngle === 180) heading = norm360(heading + 180);
+      pitch = aim.alt;
+      source = "compass+tilt";
     } else {
-      heading = aim.az;
+      // Tilt only — still update pitch so vertical pan works
+      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+      heading = state.headingRaw != null ? state.headingRaw : aim.az;
+      pitch = aim.alt;
+      source = "tilt-only";
     }
 
-    const pitch = aim.alt;
+    if (gamma != null) state.roll = gamma;
+    applyAim(heading, pitch, source);
+  }
 
-    state.headingRaw = heading;
-    state.pitchRaw = pitch;
-    state.roll = gamma;
+  /**
+   * Gyro: keep overlays moving when compass/orientation is sticky on iOS.
+   * rotationRate is deg/s in device frame.
+   */
+  function onMotion(e) {
+    const now = performance.now();
+    const prev = state._lastMotionTs || now;
+    let dt = (now - prev) / 1000;
+    state._lastMotionTs = now;
+    if (dt <= 0 || dt > 0.25) dt = 0.016;
 
-    // Light smoothing — heavy lag makes AR feel "wrong"
-    state.smoothHeading = smoothAngle(
-      state.smoothHeading,
-      norm360(heading + state.headingOffset),
-      0.55
+    const rr = e.rotationRate;
+    if (!rr) return;
+
+    const ra = typeof rr.alpha === "number" && !Number.isNaN(rr.alpha) ? rr.alpha : 0;
+    const rb = typeof rr.beta === "number" && !Number.isNaN(rr.beta) ? rr.beta : 0;
+    const rg = typeof rr.gamma === "number" && !Number.isNaN(rr.gamma) ? rr.gamma : 0;
+    const gyroSpin = Math.abs(ra) + Math.abs(rb) + Math.abs(rg);
+    if (gyroSpin < 3) return; // idle noise
+
+    const orientAge = now - (state.lastOrientTs || 0);
+    // If matrix orientation is healthy and recent, skip gyro (avoid double-count)
+    if (orientAge < 120 && state.orientSource === "matrix") return;
+    if (orientAge < 120 && state.orientSource === "matrix+compass") return;
+
+    let yawRate = 0;
+    let pitchRate = 0;
+    const ang = state.screenAngle || 0;
+    if (ang === 0 || ang === 180) {
+      // Portrait viewfinder: turn left/right ~ alpha; tilt up/down ~ beta
+      yawRate = -ra;
+      pitchRate = -rb;
+    } else if (ang === 90) {
+      yawRate = -rb;
+      pitchRate = rg;
+    } else if (ang === -90 || ang === 270) {
+      yawRate = rb;
+      pitchRate = -rg;
+    } else {
+      yawRate = -ra;
+      pitchRate = -rb;
+    }
+
+    // Stronger when orientation is stale or compass-only
+    const gain =
+      orientAge > 250 ? 1.0 : state.orientSource === "compass+tilt" ? 0.85 : 0.5;
+
+    const h0 = state.headingRaw != null ? state.headingRaw : 0;
+    const p0 = state.pitchRaw != null ? state.pitchRaw : 30;
+    applyAim(
+      norm360(h0 + yawRate * dt * gain),
+      Math.max(-89, Math.min(89, p0 + pitchRate * dt * gain)),
+      orientAge > 250 ? "gyro" : "gyro+orient"
     );
-    state.smoothPitch = smoothLinear(
-      state.smoothPitch,
-      pitch + state.pitchOffset,
-      0.55
-    );
-    state.heading = state.smoothHeading;
-    state.pitch = state.smoothPitch;
-    state.orientReady = true;
   }
 
   function startOrientation() {
-    window.addEventListener("deviceorientation", onOrientation, true);
-    window.addEventListener("deviceorientationabsolute", onOrientation, true);
+    if (state._orientStarted) return;
+    state._orientStarted = true;
+    state.orientEventCount = 0;
+    state.motionEventCount = 0;
+
+    const opts = { capture: true, passive: true };
+    window.addEventListener("deviceorientation", onOrientation, opts);
+    window.addEventListener("deviceorientationabsolute", onOrientation, opts);
+    window.addEventListener(
+      "devicemotion",
+      (e) => {
+        state.motionEventCount = (state.motionEventCount || 0) + 1;
+        onMotion(e);
+      },
+      opts
+    );
     window.addEventListener("orientationchange", updateScreenAngle);
     if (screen.orientation) {
       screen.orientation.addEventListener("change", updateScreenAngle);
     }
+
+    // Watchdog: warn if sensors never move overlays
+    setTimeout(() => {
+      if (!state.running) return;
+      if ((state.orientEventCount || 0) < 3 && (state.motionEventCount || 0) < 3) {
+        setStatus(
+          "Sensors quiet — allow Motion & Orientation; wave phone in a figure‑8",
+          "warn"
+        );
+      }
+    }, 2500);
   }
 
   function applyGeo(pos) {
@@ -1430,7 +1544,12 @@
       fov.h.toFixed(0) +
       "° · aya " +
       (state._aya != null ? state._aya.toFixed(2) + "°" : "—") +
-      " Raman" +
+      " Raman · " +
+      (state.orientSource || "no-sensor") +
+      " · ev " +
+      (state.orientEventCount || 0) +
+      "/" +
+      (state.motionEventCount || 0) +
       iss;
   }
 
