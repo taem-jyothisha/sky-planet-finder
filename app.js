@@ -65,6 +65,7 @@
     layerHint: $("layerHint"),
     listMeta: $("listMeta"),
     onlyAbove: $("onlyAbove"),
+    starNames: $("starNames"),
     tonightStrip: $("tonightStrip"),
   };
 
@@ -95,7 +96,16 @@
     /** @type {Array<object>} */
     objects: [],
     /** Which overlays are drawn on camera (multi-select, Maps-style) */
-    overlays: { graha: true, rasi: true, nakshatra: true, iss: false },
+    overlays: {
+      graha: true,
+      rasi: true,
+      nakshatra: true,
+      stars: true, // constellation stick figures + bright stars
+      iss: false,
+    },
+    showStarNames: true,
+    starCache: {}, // name -> {az, alt, mag, name, nak}
+    starCacheAt: 0,
     /** Which list Find opens (last focused layer) */
     activeLayer: "graha",
     onlyAbove: false,
@@ -763,6 +773,173 @@
     if (ev.touches.length < 2) pinchStartDist = null;
   }
 
+  // ── Fixed stars / constellations ─────────────────────────────────────
+
+  function S() {
+    return window.SkyStars;
+  }
+
+  /** Recompute star alt/az every ~2s (stars move slowly with sky) */
+  function computeStars() {
+    if (state.lat == null || typeof Astronomy === "undefined" || !S()) return;
+    const now = performance.now();
+    if (state.starCacheAt && now - state.starCacheAt < 2000) return;
+
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    const cache = {};
+    const stars = S().STARS;
+
+    // Reuse Star1 slot for each star (astronomy-engine allows DefineStar)
+    for (const key of Object.keys(stars)) {
+      const s = stars[key];
+      try {
+        Astronomy.DefineStar(Astronomy.Body.Star1, s.ra, s.dec, 100);
+        const equ = Astronomy.Equator(
+          Astronomy.Body.Star1,
+          time,
+          observer,
+          true,
+          true
+        );
+        const hor = Astronomy.Horizon(
+          time,
+          observer,
+          equ.ra,
+          equ.dec,
+          "normal"
+        );
+        cache[key] = {
+          id: "star:" + key,
+          kind: "star",
+          key,
+          label: s.name,
+          az: hor.azimuth,
+          alt: hor.altitude,
+          mag: s.mag,
+          nak: s.nak || null,
+          color: s.mag <= 0.5 ? "#ffffff" : s.mag <= 1.5 ? "#e8f0ff" : "#c8d4f0",
+        };
+      } catch (err) {
+        /* skip star */
+      }
+    }
+    state.starCache = cache;
+    state.starCacheAt = now;
+  }
+
+  /**
+   * Draw constellation stick figures + bright star dots.
+   * These are LANDMARKS for the eye — not Raman rāśi boundaries.
+   */
+  function drawConstellations(w, h) {
+    if (!state.overlays.stars || !S()) return;
+    if (state.heading == null || state.pitch == null) return;
+    computeStars();
+    const cache = state.starCache || {};
+    const showNames = state.showStarNames !== false;
+
+    // Lines first (under dots)
+    ctx.save();
+    for (const c of S().CONSTELLATIONS) {
+      let anyIn = false;
+      const segs = [];
+      for (const [a, b] of c.lines) {
+        const sa = cache[a];
+        const sb = cache[b];
+        if (!sa || !sb) continue;
+        if (sa.alt < -5 && sb.alt < -5) continue;
+        const pa = project(sa);
+        const pb = project(sb);
+        if (!pa || !pb) continue;
+        // draw if either end in/near FOV
+        if (!pa.inFov && !pb.inFov && pa.angDist > 40 && pb.angDist > 40) continue;
+        segs.push([pa, pb]);
+        if (pa.inFov || pb.inFov) anyIn = true;
+      }
+      if (!segs.length) continue;
+
+      ctx.strokeStyle = anyIn
+        ? "rgba(180, 210, 255, 0.55)"
+        : "rgba(140, 160, 200, 0.25)";
+      ctx.lineWidth = 1.4;
+      ctx.lineJoin = "round";
+      for (const [pa, pb] of segs) {
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+
+      // Constellation name at centroid of in-FOV points
+      const pts = [];
+      for (const [pa, pb] of segs) {
+        if (pa.inFov) pts.push(pa);
+        if (pb.inFov) pts.push(pb);
+      }
+      if (pts.length >= 2) {
+        let sx = 0;
+        let sy = 0;
+        for (const p of pts) {
+          sx += p.x;
+          sy += p.y;
+        }
+        const cx = sx / pts.length;
+        const cy = sy / pts.length;
+        const lab = c.label;
+        ctx.font = "700 13px -apple-system, system-ui, sans-serif";
+        const tw = ctx.measureText(lab).width;
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        roundRect(ctx, cx - tw / 2 - 6, cy - 22, tw + 12, 18, 6);
+        ctx.fill();
+        ctx.fillStyle = "rgba(200, 220, 255, 0.95)";
+        ctx.fillText(lab, cx - tw / 2, cy - 9);
+        if (c.hint && pts.length >= 3) {
+          ctx.font = "600 9px -apple-system, system-ui, sans-serif";
+          const hw = ctx.measureText(c.hint).width;
+          ctx.fillStyle = "rgba(160, 180, 220, 0.75)";
+          ctx.fillText(c.hint, cx - hw / 2, cy - 24);
+        }
+      }
+    }
+
+    // Star dots
+    for (const key of Object.keys(cache)) {
+      const s = cache[key];
+      if (s.alt < -3) continue;
+      const p = project(s);
+      if (!p || (!p.inFov && p.angDist > 35)) continue;
+
+      const r =
+        s.mag <= 0 ? 4.5 : s.mag <= 1 ? 3.5 : s.mag <= 2 ? 2.6 : s.mag <= 3 ? 2 : 1.4;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.fill();
+
+      const showThisName =
+        showNames &&
+        p.inFov &&
+        (s.mag <= 1.6 || s.nak || key === "Polaris" || key === "Sirius");
+      if (showThisName) {
+        const text = s.nak ? s.label + " · " + s.nak : s.label;
+        ctx.font = "600 10px -apple-system, system-ui, sans-serif";
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        roundRect(ctx, p.x + r + 3, p.y - 7, tw + 6, 14, 4);
+        ctx.fill();
+        ctx.fillStyle = "rgba(230, 235, 255, 0.9)";
+        ctx.fillText(text, p.x + r + 6, p.y + 3);
+      }
+    }
+    ctx.restore();
+  }
+
   // ── Sky catalog ──────────────────────────────────────────────────────
 
   async function refreshISS(force) {
@@ -1080,7 +1257,10 @@
       ctx.textAlign = "start";
     }
 
-    // ── Sky belts (zodiac + nakṣatra) under point markers ──
+    // ── Fixed stars & stick figures first (landmarks for the eye) ──
+    if (state.overlays.stars) drawConstellations(w, h);
+
+    // ── Sky belts (zodiac + nakṣatra) under graha markers ──
     if (state.overlays.rasi) drawZodiacBelt(w, h);
     if (state.overlays.nakshatra) drawNakshatraBelt(w, h);
 
@@ -1701,6 +1881,10 @@
       title: "Zodiac belt",
       hint: "12 rāśis · ecliptic band · Raman",
     },
+    stars: {
+      title: "Constellations",
+      hint: "Stick figures + bright stars · landmarks for the eye",
+    },
     iss: {
       title: "ISS",
       hint: "International Space Station · live",
@@ -1708,6 +1892,61 @@
   };
 
   function objectsForActiveLayer() {
+    // Constellation list = named patterns + yoga-tārā anchors
+    if (state.activeLayer === "stars") {
+      if (!S()) return [];
+      computeStars();
+      const cache = state.starCache || {};
+      const items = S().CONSTELLATIONS.map((c) => {
+        // centroid alt/az from member stars above horizon
+        let n = 0;
+        let az = 0;
+        let alt = 0;
+        const names = new Set();
+        for (const [a, b] of c.lines) {
+          names.add(a);
+          names.add(b);
+        }
+        for (const k of names) {
+          const s = cache[k];
+          if (!s || s.alt < -10) continue;
+          az += s.az;
+          alt += s.alt;
+          n++;
+        }
+        if (!n) {
+          return {
+            id: "const:" + c.id,
+            kind: "stars",
+            label: c.label,
+            sub: c.hint + " · below horizon now",
+            detail: "Pan the sky · Align if labels drift",
+            color: "#a8c0ff",
+            az: 0,
+            alt: -90,
+            skyRole: { badge: "Set", code: "set" },
+          };
+        }
+        return {
+          id: "const:" + c.id,
+          kind: "stars",
+          label: c.label,
+          sub: c.hint,
+          detail: "Stick figure landmark · not a Raman rāśi",
+          color: "#a8c0ff",
+          az: az / n,
+          alt: alt / n,
+          skyRole: {
+            badge: alt / n > 5 ? "Up" : "Low",
+            code: alt / n > 5 ? "visible" : "horizon",
+          },
+        };
+      });
+      // Put up patterns first
+      items.sort((a, b) => (b.alt > 0 ? 1 : 0) - (a.alt > 0 ? 1 : 0) || b.alt - a.alt);
+      return items;
+    }
+
     let items = state.objects.filter((o) => o.kind === state.activeLayer);
     // Graha layer: ALWAYS all 9 (never hide below-horizon from the list)
     if (state.activeLayer === "graha") {
@@ -1757,14 +1996,14 @@
       }
     }
     if (els.findFabLabel) {
-      els.findFabLabel.textContent =
-        state.activeLayer === "graha"
-          ? "Graha"
-          : state.activeLayer === "nakshatra"
-            ? "Nakṣatra"
-            : state.activeLayer === "rasi"
-              ? "Zodiac"
-              : "ISS";
+      const map = {
+        graha: "Graha",
+        nakshatra: "Nakṣatra",
+        rasi: "Zodiac",
+        stars: "Stars",
+        iss: "ISS",
+      };
+      els.findFabLabel.textContent = map[state.activeLayer] || "Find";
     }
 
     els.layerCards?.forEach((card) => {
@@ -2113,6 +2352,7 @@
     try {
       if (ts - state.lastBodyCompute > 500) {
         computeSky();
+        if (state.overlays.stars) computeStars();
         state.lastBodyCompute = ts;
       }
       if (ts - state.lastIssFetch > 4000) {
@@ -2304,6 +2544,9 @@
     els.onlyAbove?.addEventListener("change", () => {
       state.onlyAbove = !!els.onlyAbove.checked;
       buildObjectList();
+    });
+    els.starNames?.addEventListener("change", () => {
+      state.showStarNames = !!els.starNames.checked;
     });
 
     // Tap app (not canvas — pointer-events none) to re-show FABs while guiding

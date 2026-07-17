@@ -113,6 +113,12 @@
           <span class="lc-desc">27 mansions band</span>
           <span class="lc-on">ON</span>
         </button>
+        <button type="button" class="layer-card active" data-layer="stars" aria-pressed="true">
+          <span class="lc-icon">✧</span>
+          <span class="lc-name">Constellations</span>
+          <span class="lc-desc">Star patterns · landmarks</span>
+          <span class="lc-on">ON</span>
+        </button>
         <button type="button" class="layer-card" data-layer="iss" aria-pressed="false">
           <span class="lc-icon">🛰</span>
           <span class="lc-name">ISS</span>
@@ -124,14 +130,15 @@
         <input type="checkbox" id="onlyAbove" />
         List: only above horizon (grahas always show all 9)
       </label>
+      <label class="check-tool panel-check">
+        <input type="checkbox" id="starNames" checked />
+        Show star names (bright)
+      </label>
       <div class="ac-box" id="acBox">
-        <strong>Jyotishi acceptance (Raman)</strong><br />
-        • All 9 grahas listed with rāśi · nakṣatra · pāda<br />
-        • Bright / Visible / Chāyā / Set badges for night recognition<br />
-        • Zodiac + nakṣatra belts on camera for structure<br />
-        • Crosshair shows graha or belt rāśi·nakṣatra under aim<br />
-        • Udaya marker ≈ rising rāśi direction<br />
-        • Align on Candra once so AR matches the real sky
+        <strong>See the sky structure</strong><br />
+        • <b>Constellations</b> = stick figures (Orion, Dipper, Scorpius…)<br />
+        • <b>Zodiac / Nakṣatra</b> = Raman belts on the ecliptic<br />
+        • Align on Moon once · pan slowly · start with Orion / Dipper
       </div>
     </div>
 
@@ -198,7 +205,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="astro-extras.js?v=12"></script>
+  <script src="stars-constellations.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
