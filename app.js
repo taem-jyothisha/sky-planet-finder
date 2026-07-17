@@ -1,23 +1,11 @@
 /**
- * Sky — camera AR planet finder (iPhone 15 Pro Max tuned)
- * High-accuracy GPS · true-sky alt/az · zoom-aware FOV · one-tap calibrate
+ * Sky — AR finder: grahas, nakṣatras, rāśis, ISS
+ * iPhone-tuned · high-accuracy GPS · zoom · calibrate
  */
 (() => {
   "use strict";
 
-  const BODIES = [
-    { id: "Sun", label: "Sun", color: "#ffd27a", body: "Sun", priority: 1 },
-    { id: "Moon", label: "Moon", color: "#e8eefc", body: "Moon", priority: 1 },
-    { id: "Venus", label: "Venus", color: "#f5e6c8", body: "Venus", priority: 2 },
-    { id: "Jupiter", label: "Jupiter", color: "#f0b878", body: "Jupiter", priority: 2 },
-    { id: "Mars", label: "Mars", color: "#ff7a5c", body: "Mars", priority: 3 },
-    { id: "Saturn", label: "Saturn", color: "#e8d090", body: "Saturn", priority: 3 },
-    { id: "Mercury", label: "Mercury", color: "#c4b8a8", body: "Mercury", priority: 4 },
-    { id: "Uranus", label: "Uranus", color: "#7ec8d8", body: "Uranus", priority: 5 },
-    { id: "Neptune", label: "Neptune", color: "#5a8fff", body: "Neptune", priority: 5 },
-  ];
-
-  // iPhone main camera ~24mm ≈ 60–65° horizontal FOV at 1×
+  const X = () => window.SkyExtras;
   const BASE_H_FOV = 62;
   const BASE_V_FOV = 46;
 
@@ -34,7 +22,7 @@
     btnCalibrate: $("btnCalibrate"),
     statusChip: $("statusChip"),
     locChip: $("locChip"),
-    planetList: $("planetList"),
+    objectList: $("objectList"),
     pointingMain: $("pointingMain"),
     pointingSub: $("pointingSub"),
     guideArrow: $("guideArrow"),
@@ -51,6 +39,8 @@
     zoomBtns: document.querySelectorAll("[data-zoom]"),
     zoomSlider: $("zoomSlider"),
     debugLine: $("debugLine"),
+    layerBtns: document.querySelectorAll("[data-layer]"),
+    listTitle: $("listTitle"),
   };
 
   const ctx = els.canvas.getContext("2d");
@@ -70,14 +60,19 @@
     headingOffset: 0,
     pitchOffset: 0,
     zoom: 1,
-    zoomMin: 1,
-    zoomMax: 5,
+    zoomMin: 0.5,
+    zoomMax: 8,
     hardwareZoom: false,
     targetId: null,
-    bodies: [],
+    /** @type {Array<object>} */
+    objects: [],
+    layers: { graha: true, nakshatra: true, rasi: true, iss: true },
     running: false,
     orientReady: false,
     lastBodyCompute: 0,
+    lastIssFetch: 0,
+    iss: null,
+    issError: null,
     geoWatchId: null,
     screenAngle: 0,
     smoothHeading: null,
@@ -95,14 +90,9 @@
       els.locChip.textContent = "GPS…";
       return;
     }
-    const acc =
-      state.accM != null ? " ±" + Math.round(state.accM) + "m" : "";
+    const acc = state.accM != null ? " ±" + Math.round(state.accM) + "m" : "";
     els.locChip.textContent =
-      state.lat.toFixed(5) +
-      ", " +
-      state.lon.toFixed(5) +
-      acc +
-      (state.elevM ? " · " + Math.round(state.elevM) + "m" : "");
+      state.lat.toFixed(5) + ", " + state.lon.toFixed(5) + acc;
   }
 
   function showGateError(msg) {
@@ -130,8 +120,7 @@
 
   function smoothAngle(prev, next, alpha) {
     if (prev == null || Number.isNaN(prev)) return next;
-    const d = deltaAngle(prev, next);
-    return norm360(prev + d * alpha);
+    return norm360(prev + deltaAngle(prev, next) * alpha);
   }
 
   function smoothLinear(prev, next, alpha) {
@@ -140,16 +129,11 @@
   }
 
   function viewFov() {
-    // Zoom in → narrower FOV (optical or digital)
     const z = Math.max(0.5, state.zoom || 1);
-    return {
-      h: BASE_H_FOV / z,
-      v: BASE_V_FOV / z,
-    };
+    return { h: BASE_H_FOV / z, v: BASE_V_FOV / z };
   }
 
   function lookAtThreshold() {
-    // Tighter ID when zoomed in
     const { h } = viewFov();
     return Math.max(2.5, Math.min(10, h * 0.14));
   }
@@ -165,13 +149,9 @@
 
   function updateScreenAngle() {
     const so = screen.orientation || window.screen?.orientation;
-    if (so && typeof so.angle === "number") {
-      state.screenAngle = so.angle;
-    } else if (typeof window.orientation === "number") {
-      state.screenAngle = window.orientation;
-    } else {
-      state.screenAngle = window.innerWidth > window.innerHeight ? 90 : 0;
-    }
+    if (so && typeof so.angle === "number") state.screenAngle = so.angle;
+    else if (typeof window.orientation === "number") state.screenAngle = window.orientation;
+    else state.screenAngle = window.innerWidth > window.innerHeight ? 90 : 0;
   }
 
   // ── Sensors ──────────────────────────────────────────────────────────
@@ -184,7 +164,7 @@
       const res = await DeviceOrientationEvent.requestPermission();
       if (res !== "granted") {
         throw new Error(
-          "Motion / compass denied. Settings → Safari → Motion & Orientation → Allow, then reload."
+          "Motion / compass denied. Settings → Safari → Motion & Orientation → Allow."
         );
       }
     }
@@ -194,77 +174,57 @@
     ) {
       try {
         await DeviceMotionEvent.requestPermission();
-      } catch (_) {
-        /* optional */
-      }
+      } catch (_) {}
     }
   }
 
-  /**
-   * Convert deviceorientation → camera heading (az) + pitch (alt).
-   * Tuned for rear camera as viewfinder on iPhone (portrait + landscape).
-   * webkitCompassHeading is preferred on iOS (degrees clockwise from north).
-   */
   function onOrientation(e) {
     updateScreenAngle();
     const beta = typeof e.beta === "number" ? e.beta : null;
     const gamma = typeof e.gamma === "number" ? e.gamma : null;
     const alpha = typeof e.alpha === "number" ? e.alpha : null;
 
-    // --- Heading ---
     let heading = null;
-    if (
-      typeof e.webkitCompassHeading === "number" &&
-      !Number.isNaN(e.webkitCompassHeading)
-    ) {
-      // iOS: heading of the top of the device; for camera viewfinder upright
-      // this is the direction the camera faces when held like a camera.
+    if (typeof e.webkitCompassHeading === "number" && !Number.isNaN(e.webkitCompassHeading)) {
       heading = e.webkitCompassHeading;
-      // Landscape: top of device is not the camera forward direction.
-      // When landscape-left (angle 90), camera forward ≈ heading + 90, etc.
       const ang = state.screenAngle;
       if (ang === 90) heading = norm360(heading + 90);
       else if (ang === -90 || ang === 270) heading = norm360(heading - 90);
       else if (ang === 180) heading = norm360(heading + 180);
     } else if (alpha != null) {
-      // Absolute-ish fallback (Android / desktop)
       heading = norm360(360 - alpha);
       const ang = state.screenAngle;
       if (ang === 90) heading = norm360(heading + 90);
       else if (ang === -90 || ang === 270) heading = norm360(heading - 90);
     }
 
-    // --- Pitch (camera altitude) ---
-    // Portrait upright: beta≈90 → horizon (0°). Tilt back (look up): beta↓ → pitch↑.
-    // pitch = 90 - beta  (rear camera, portrait)
-    // Landscape: mix beta/gamma.
     let pitch = null;
     if (beta != null) {
       const ang = state.screenAngle;
-      if (ang === 0 || ang === 180) {
-        pitch = 90 - beta;
-      } else if (ang === 90) {
-        // landscape-left: gamma dominates elevation
-        pitch = gamma != null ? -gamma : 90 - beta;
-      } else if (ang === -90 || ang === 270) {
-        pitch = gamma != null ? gamma : 90 - beta;
-      } else {
-        pitch = 90 - beta;
-      }
+      if (ang === 0 || ang === 180) pitch = 90 - beta;
+      else if (ang === 90) pitch = gamma != null ? -gamma : 90 - beta;
+      else if (ang === -90 || ang === 270) pitch = gamma != null ? gamma : 90 - beta;
+      else pitch = 90 - beta;
       pitch = Math.max(-40, Math.min(95, pitch));
     }
 
     if (heading != null) {
       state.headingRaw = heading;
-      const withOff = norm360(heading + state.headingOffset);
-      state.smoothHeading = smoothAngle(state.smoothHeading, withOff, 0.35);
+      state.smoothHeading = smoothAngle(
+        state.smoothHeading,
+        norm360(heading + state.headingOffset),
+        0.35
+      );
       state.heading = state.smoothHeading;
       state.orientReady = true;
     }
     if (pitch != null) {
       state.pitchRaw = pitch;
-      const withOff = pitch + state.pitchOffset;
-      state.smoothPitch = smoothLinear(state.smoothPitch, withOff, 0.35);
+      state.smoothPitch = smoothLinear(
+        state.smoothPitch,
+        pitch + state.pitchOffset,
+        0.35
+      );
       state.pitch = state.smoothPitch;
     }
     if (gamma != null) state.roll = gamma;
@@ -287,7 +247,7 @@
       state.elevM = pos.coords.altitude;
     }
     setLocChip();
-    computeBodies();
+    computeSky();
     if (state.accM != null && state.accM < 50) {
       setStatus("GPS locked ±" + Math.round(state.accM) + "m", "ok");
     } else if (state.accM != null) {
@@ -296,10 +256,7 @@
   }
 
   async function getLocation() {
-    if (!navigator.geolocation) {
-      throw new Error("Geolocation not available.");
-    }
-    // First fix: force fresh high-accuracy reading (Pro GPS + Wi‑Fi assist)
+    if (!navigator.geolocation) throw new Error("Geolocation not available.");
     const first = await new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
@@ -308,36 +265,23 @@
       });
     });
     applyGeo(first);
-
-    // Keep watching — iPhone improves accuracy after a few seconds outdoors
-    if (state.geoWatchId != null) {
-      navigator.geolocation.clearWatch(state.geoWatchId);
-    }
-    state.geoWatchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        // Prefer more accurate fixes
-        if (state.accM == null || pos.coords.accuracy <= state.accM + 5) {
-          applyGeo(pos);
-        } else {
-          // still accept if much fresher and reasonable
-          applyGeo(pos);
-        }
-      },
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
-    );
+    if (state.geoWatchId != null) navigator.geolocation.clearWatch(state.geoWatchId);
+    state.geoWatchId = navigator.geolocation.watchPosition(applyGeo, () => {}, {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 20000,
+    });
   }
 
-  // ── Camera + zoom (iPhone 15 Pro Max) ────────────────────────────────
+  // ── Camera + zoom ────────────────────────────────────────────────────
 
   async function startCamera() {
     if (!window.isSecureContext) {
-      throw new Error("Need HTTPS (GitHub Pages link) for camera on iPhone.");
+      throw new Error("Need HTTPS for camera on iPhone.");
     }
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Camera API not available.");
     }
-
     const tries = [
       {
         audio: false,
@@ -345,24 +289,15 @@
           facingMode: { exact: "environment" },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
         },
       },
-      {
-        audio: false,
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      },
+      { audio: false, video: { facingMode: { ideal: "environment" } } },
       { audio: false, video: { facingMode: "environment" } },
     ];
-
     let lastErr = null;
-    for (const constraints of tries) {
+    for (const c of tries) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia(c);
         state.stream = stream;
         state.videoTrack = stream.getVideoTracks()[0] || null;
         els.camera.setAttribute("playsinline", "");
@@ -376,32 +311,22 @@
         lastErr = err;
       }
     }
-    throw new Error(
-      lastErr?.message ||
-        "Camera denied. Settings → Safari → Camera → Allow."
-    );
+    throw new Error(lastErr?.message || "Camera denied.");
   }
 
   function setupZoomFromTrack() {
     const track = state.videoTrack;
-    if (!track || typeof track.getCapabilities !== "function") {
-      state.hardwareZoom = false;
-      state.zoomMin = 0.5;
-      state.zoomMax = 8;
-      syncZoomUi();
-      return;
+    if (track && typeof track.getCapabilities === "function") {
+      const caps = track.getCapabilities() || {};
+      if (caps.zoom) {
+        state.hardwareZoom = true;
+        state.zoomMin = caps.zoom.min ?? 1;
+        state.zoomMax = Math.min(caps.zoom.max ?? 5, 15);
+        const settings = track.getSettings?.() || {};
+        state.zoom = settings.zoom || Math.max(state.zoomMin, 1);
+      }
     }
-    const caps = track.getCapabilities() || {};
-    if (caps.zoom) {
-      state.hardwareZoom = true;
-      state.zoomMin = caps.zoom.min ?? 1;
-      state.zoomMax = Math.min(caps.zoom.max ?? 5, 15);
-      const settings = track.getSettings ? track.getSettings() : {};
-      if (settings.zoom) state.zoom = settings.zoom;
-      else state.zoom = Math.max(state.zoomMin, 1);
-    } else {
-      // Digital zoom fallback — iPhone Safari often exposes zoom on Pro models
-      state.hardwareZoom = false;
+    if (!state.hardwareZoom) {
       state.zoomMin = 0.5;
       state.zoomMax = 8;
       state.zoom = 1;
@@ -412,60 +337,40 @@
       els.zoomSlider.step = "0.1";
       els.zoomSlider.value = String(state.zoom);
     }
-    syncZoomUi();
     applyZoom(state.zoom);
   }
 
   async function applyZoom(z) {
     z = Math.max(state.zoomMin, Math.min(state.zoomMax, Number(z) || 1));
     state.zoom = z;
-
     const track = state.videoTrack;
     if (track && state.hardwareZoom) {
       try {
         await track.applyConstraints({ advanced: [{ zoom: z }] });
-        // CSS: no extra scale when hardware zoom works
         els.camera.style.transform = "scale(1)";
       } catch (_) {
-        // digital fallback
         els.camera.style.transform = "scale(" + Math.max(1, z) + ")";
-        els.camera.style.transformOrigin = "center center";
       }
     } else {
-      // Digital zoom: scale video; FOV model uses state.zoom
-      const s = Math.max(0.5, z);
-      els.camera.style.transform = "scale(" + s + ")";
-      els.camera.style.transformOrigin = "center center";
+      els.camera.style.transform = "scale(" + Math.max(0.5, z) + ")";
     }
-    syncZoomUi();
-  }
-
-  function syncZoomUi() {
+    els.camera.style.transformOrigin = "center center";
     if (els.zoomVal) {
       els.zoomVal.textContent =
-        (Math.round(state.zoom * 10) / 10) +
-        "×" +
-        (state.hardwareZoom ? " · optical" : " · digital");
+        Math.round(state.zoom * 10) / 10 + "×" + (state.hardwareZoom ? " · hw" : " · dig");
     }
-    if (els.zoomSlider && String(els.zoomSlider.value) !== String(state.zoom)) {
-      els.zoomSlider.value = String(state.zoom);
-    }
+    if (els.zoomSlider) els.zoomSlider.value = String(state.zoom);
     els.zoomBtns?.forEach((btn) => {
       const v = Number(btn.getAttribute("data-zoom"));
       btn.classList.toggle("active", Math.abs(v - state.zoom) < 0.15);
     });
   }
 
-  // Pinch zoom
   let pinchStartDist = null;
   let pinchStartZoom = 1;
-
-  function touchDist(t0, t1) {
-    const dx = t0.clientX - t1.clientX;
-    const dy = t0.clientY - t1.clientY;
-    return Math.hypot(dx, dy);
+  function touchDist(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   }
-
   function onTouchStart(ev) {
     if (ev.touches.length === 2) {
       pinchStartDist = touchDist(ev.touches[0], ev.touches[1]);
@@ -475,83 +380,199 @@
   function onTouchMove(ev) {
     if (ev.touches.length === 2 && pinchStartDist) {
       ev.preventDefault();
-      const d = touchDist(ev.touches[0], ev.touches[1]);
-      const scale = d / pinchStartDist;
-      applyZoom(pinchStartZoom * scale);
+      applyZoom(pinchStartZoom * (touchDist(ev.touches[0], ev.touches[1]) / pinchStartDist));
     }
   }
   function onTouchEnd(ev) {
     if (ev.touches.length < 2) pinchStartDist = null;
   }
 
-  // ── Astronomy ────────────────────────────────────────────────────────
+  // ── Sky catalog ──────────────────────────────────────────────────────
 
-  function computeBodies() {
-    if (state.lat == null || state.lon == null || typeof Astronomy === "undefined") {
-      return;
+  async function refreshISS(force) {
+    if (!state.layers.iss) return;
+    if (!force && performance.now() - state.lastIssFetch < 4000) return;
+    if (state.lat == null) return;
+    state.lastIssFetch = performance.now();
+    try {
+      const iss = await X().fetchISS();
+      const look = X().lookAngles(
+        state.lat,
+        state.lon,
+        state.elevM || 0,
+        iss.lat,
+        iss.lon,
+        (iss.altKm || 420) * 1000
+      );
+      state.iss = {
+        ...iss,
+        az: look.azimuth,
+        alt: look.altitude,
+        rangeKm: look.rangeKm,
+      };
+      state.issError = null;
+    } catch (err) {
+      state.issError = err.message || String(err);
     }
-    const elev = state.elevM || 0;
-    const observer = new Astronomy.Observer(state.lat, state.lon, elev);
-    const time = Astronomy.MakeTime(new Date());
-    const out = [];
-
-    for (const b of BODIES) {
-      try {
-        // ofdate=true, aberration=true — best apparent place for observers
-        const equ = Astronomy.Equator(b.body, time, observer, true, true);
-        const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
-        let mag = null;
-        try {
-          if (b.body === "Moon") {
-            // Moon apparent magnitude rough via illumination phase
-            const illum = Astronomy.Illumination(b.body, time);
-            mag = illum.mag;
-          } else if (b.body !== "Sun") {
-            const illum = Astronomy.Illumination(b.body, time);
-            mag = illum.mag;
-          } else {
-            mag = -26.7;
-          }
-        } catch (_) {
-          /* ignore */
-        }
-        out.push({
-          id: b.id,
-          label: b.label,
-          color: b.color,
-          priority: b.priority,
-          az: hor.azimuth,
-          alt: hor.altitude,
-          mag,
-        });
-      } catch (err) {
-        console.warn("body fail", b.id, err);
-      }
-    }
-    // Prefer brighter / higher priority when sorting for HUD
-    out.sort((a, b) => {
-      const am = a.mag ?? 99;
-      const bm = b.mag ?? 99;
-      if (am !== bm) return am - bm;
-      return a.priority - b.priority;
-    });
-    state.bodies = out;
   }
 
-  // ── Screen projection (CSS pixels — fixed DPR bug) ───────────────────
+  function computeSky() {
+    if (state.lat == null || state.lon == null || typeof Astronomy === "undefined" || !X()) {
+      return;
+    }
+    const Ex = X();
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    const aya = Ex.lahiriAyanamsa(time);
+    const out = [];
 
-  function project(body) {
+    // ── Grahas ──
+    if (state.layers.graha) {
+      for (const g of Ex.GRAHAS) {
+        try {
+          let az, alt, tropLon, sidLon, mag = null;
+          if (g.node === "rahu") {
+            tropLon = Ex.meanAscendingNode(time);
+            sidLon = Ex.tropicalToSidereal(tropLon, time);
+            const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
+            az = hor.azimuth;
+            alt = hor.altitude;
+          } else if (g.node === "ketu") {
+            tropLon = Ex.norm360(Ex.meanAscendingNode(time) + 180);
+            sidLon = Ex.tropicalToSidereal(tropLon, time);
+            const hor = Ex.eclipticToHorizon(tropLon, 0, time, observer);
+            az = hor.azimuth;
+            alt = hor.altitude;
+          } else {
+            const equ = Astronomy.Equator(g.body, time, observer, true, true);
+            const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
+            az = hor.azimuth;
+            alt = hor.altitude;
+            tropLon = Ex.tropicalEclipticLon(g.body, time);
+            sidLon = Ex.tropicalToSidereal(tropLon, time);
+            try {
+              if (g.body === "Sun") mag = -26.7;
+              else mag = Astronomy.Illumination(g.body, time).mag;
+            } catch (_) {}
+          }
+          out.push({
+            id: "graha:" + g.id,
+            kind: "graha",
+            label: g.label,
+            sub: g.en + " · " + Ex.rasiName(sidLon) + " · " + Ex.nakshatraName(sidLon),
+            color: g.color,
+            az,
+            alt,
+            mag,
+            sidLon,
+            tropLon,
+            rasi: Ex.rasiName(sidLon),
+            nakshatra: Ex.nakshatraName(sidLon),
+          });
+        } catch (err) {
+          console.warn("graha", g.id, err);
+        }
+      }
+    }
+
+    // ── Rāśis (center of each 30° sidereal sign on ecliptic) ──
+    if (state.layers.rasi) {
+      Ex.RASIS.forEach((r, i) => {
+        const sidCenter = i * 30 + 15;
+        const trop = Ex.siderealToTropical(sidCenter, time);
+        try {
+          const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
+          out.push({
+            id: "rasi:" + r.id,
+            kind: "rasi",
+            label: r.label,
+            sub: r.en + " · center",
+            color: "hsl(" + (i * 30) + " 70% 70%)",
+            az: hor.azimuth,
+            alt: hor.altitude,
+            mag: null,
+            sidLon: sidCenter,
+            region: true,
+          });
+        } catch (_) {}
+      });
+    }
+
+    // ── Nakṣatras (center of each 13°20' mansion) ──
+    if (state.layers.nakshatra) {
+      const width = 360 / 27;
+      Ex.NAKSHATRAS.forEach((name, i) => {
+        const sidCenter = i * width + width / 2;
+        const trop = Ex.siderealToTropical(sidCenter, time);
+        try {
+          const hor = Ex.eclipticToHorizon(trop, 0, time, observer);
+          out.push({
+            id: "nak:" + i,
+            kind: "nakshatra",
+            label: name,
+            sub: "Nakṣatra " + (i + 1) + "/27",
+            color: "hsl(" + ((i * 13.3 + 180) % 360) + " 65% 72%)",
+            az: hor.azimuth,
+            alt: hor.altitude,
+            mag: null,
+            sidLon: sidCenter,
+            region: true,
+          });
+        } catch (_) {}
+      });
+    }
+
+    // ── ISS ──
+    if (state.layers.iss && state.iss) {
+      out.push({
+        id: "iss",
+        kind: "iss",
+        label: "ISS",
+        sub:
+          (state.iss.alt > 0 ? "Above horizon" : "Below") +
+          " · " +
+          Math.round(state.iss.rangeKm || 0) +
+          " km · " +
+          (state.iss.visibility || ""),
+        color: "#6dffa8",
+        az: state.iss.az,
+        alt: state.iss.alt,
+        mag: state.iss.alt > 10 ? -1.5 : 0,
+        rangeKm: state.iss.rangeKm,
+      });
+    }
+
+    // Sort: above horizon first, then by angular distance if aiming, else alt
+    out.sort((a, b) => {
+      const au = a.alt > 0 ? 0 : 1;
+      const bu = b.alt > 0 ? 0 : 1;
+      if (au !== bu) return au - bu;
+      if (state.heading != null && state.pitch != null) {
+        const da = Math.hypot(deltaAngle(state.heading, a.az), a.alt - state.pitch);
+        const db = Math.hypot(deltaAngle(state.heading, b.az), b.alt - state.pitch);
+        return da - db;
+      }
+      return b.alt - a.alt;
+    });
+
+    state.objects = out;
+    state._aya = aya;
+    state._time = time;
+  }
+
+  // ── Projection ───────────────────────────────────────────────────────
+
+  function project(obj) {
     if (state.heading == null || state.pitch == null) return null;
-    const dAz = deltaAngle(state.heading, body.az);
-    const dAlt = body.alt - state.pitch;
+    const dAz = deltaAngle(state.heading, obj.az);
+    const dAlt = obj.alt - state.pitch;
     const { w, h } = cssSize();
     const fov = viewFov();
-    // object-fit: cover — video fills screen; FOV maps to full frame
     const x = w / 2 + (dAz / (fov.h / 2)) * (w / 2);
     const y = h / 2 - (dAlt / (fov.v / 2)) * (h / 2);
     const angDist = Math.hypot(dAz, dAlt);
     const inFov =
-      Math.abs(dAz) < fov.h / 2 * 1.05 && Math.abs(dAlt) < fov.v / 2 * 1.05;
+      Math.abs(dAz) < (fov.h / 2) * 1.05 && Math.abs(dAlt) < (fov.v / 2) * 1.05;
     return { x, y, dAz, dAlt, angDist, inFov, fov };
   }
 
@@ -571,113 +592,181 @@
     const { w, h } = cssSize();
     ctx.clearRect(0, 0, w, h);
 
-    // Center reticle altitude tick (horizon aid)
-    if (state.pitch != null) {
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(w * 0.35, h * 0.42);
-      ctx.lineTo(w * 0.65, h * 0.42);
-      ctx.stroke();
+    // Ecliptic guide (sample points)
+    if (state.layers.rasi || state.layers.nakshatra) {
+      drawEclipticBand(w, h);
     }
 
     let nearest = null;
-    let nearestBright = null;
+    let nearestPointlike = null;
 
-    for (const body of state.bodies) {
-      if (body.alt < -8) continue;
-      const p = project(body);
+    for (const obj of state.objects) {
+      if (obj.alt < -12) continue;
+      const p = project(obj);
       if (!p) continue;
 
-      if (!nearest || p.angDist < nearest.angDist) {
-        nearest = { body, ...p };
-      }
-      // Bright enough naked-eye (mag < 2.5) for "looking at"
-      const bright = body.mag == null || body.mag < 2.5 || body.id === "Moon" || body.id === "Sun";
-      if (bright && (!nearestBright || p.angDist < nearestBright.angDist)) {
-        nearestBright = { body, ...p };
+      if (!nearest || p.angDist < nearest.angDist) nearest = { obj, ...p };
+
+      const pointlike = obj.kind === "graha" || obj.kind === "iss";
+      if (pointlike && (!nearestPointlike || p.angDist < nearestPointlike.angDist)) {
+        nearestPointlike = { obj, ...p };
       }
 
-      // Draw if in FOV, or selected target, or near edge for guidance
-      const drawIt = p.inFov || body.id === state.targetId || p.angDist < 25;
+      const isTarget = obj.id === state.targetId;
+      const drawIt =
+        p.inFov ||
+        isTarget ||
+        (pointlike && p.angDist < 30) ||
+        (obj.kind === "rasi" && p.angDist < 18) ||
+        (obj.kind === "nakshatra" && p.angDist < 14);
+
       if (!drawIt) continue;
 
-      const r =
-        body.id === "Sun" ? 16 : body.id === "Moon" ? 14 : body.mag != null && body.mag < 0 ? 11 : 8;
-      const alpha = p.inFov ? 1 : 0.4;
+      const px = Math.max(20, Math.min(w - 20, p.x));
+      const py = Math.max(90, Math.min(h - 200, p.y));
 
+      let r = 7;
+      if (obj.kind === "iss") r = 11;
+      else if (obj.kind === "rasi") r = 6;
+      else if (obj.kind === "nakshatra") r = 5;
+      else if (obj.label === "Sūrya") r = 15;
+      else if (obj.label === "Candra") r = 13;
+      else if (obj.mag != null && obj.mag < 0) r = 10;
+
+      const alpha = p.inFov ? 1 : isTarget ? 0.85 : 0.4;
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      // Clamp label position into view for off-screen targets
-      const px = Math.max(24, Math.min(w - 24, p.x));
-      const py = Math.max(80, Math.min(h - 180, p.y));
+      if (obj.kind === "rasi" || obj.kind === "nakshatra") {
+        // Diamond for regions
+        ctx.beginPath();
+        ctx.moveTo(px, py - r - 2);
+        ctx.lineTo(px + r, py);
+        ctx.lineTo(px, py + r + 2);
+        ctx.lineTo(px - r, py);
+        ctx.closePath();
+        ctx.fillStyle = obj.color;
+        ctx.globalAlpha = alpha * 0.85;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.7)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(px, py, r + 10, 0, Math.PI * 2);
+        ctx.fillStyle = obj.color + "44";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fillStyle = obj.color;
+        ctx.fill();
+        ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
+        ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.9)";
+        ctx.stroke();
+        if (obj.kind === "iss") {
+          // ISS cross wings
+          ctx.strokeStyle = "#6dffa8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(px - r - 8, py);
+          ctx.lineTo(px + r + 8, py);
+          ctx.moveTo(px, py - r - 4);
+          ctx.lineTo(px, py + r + 4);
+          ctx.stroke();
+        }
+      }
 
-      ctx.beginPath();
-      ctx.arc(px, py, r + 12, 0, Math.PI * 2);
-      ctx.fillStyle = body.color + "40";
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fillStyle = body.color;
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.stroke();
-
-      const magStr = body.mag != null ? " · m" + body.mag.toFixed(1) : "";
+      const kindTag =
+        obj.kind === "graha"
+          ? ""
+          : obj.kind === "iss"
+            ? " 🛰"
+            : obj.kind === "rasi"
+              ? " · rāśi"
+              : " · nak";
       const label =
-        body.label +
-        (body.alt < 0 ? " ↓" : "") +
-        (p.inFov ? "" : " · " + p.angDist.toFixed(0) + "°") +
-        magStr;
-      ctx.font = "700 14px -apple-system, system-ui, sans-serif";
+        obj.label +
+        kindTag +
+        (obj.alt < 0 ? " ↓" : "") +
+        (!p.inFov ? " · " + p.angDist.toFixed(0) + "°" : "");
+      ctx.font = (obj.kind === "nakshatra" ? "600 11px" : "700 13px") + " -apple-system, system-ui, sans-serif";
       const tw = ctx.measureText(label).width;
       const lx = px - tw / 2;
-      const ly = py - r - 16;
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      roundRect(ctx, lx - 7, ly - 13, tw + 14, 22, 9);
+      const ly = py - r - 14;
+      ctx.globalAlpha = Math.min(1, alpha + 0.15);
+      ctx.fillStyle = "rgba(0,0,0,0.62)";
+      roundRect(ctx, lx - 6, ly - 12, tw + 12, 20, 8);
       ctx.fill();
       ctx.fillStyle = "#fff";
-      ctx.fillText(label, lx, ly + 3);
+      ctx.fillText(label, lx, ly + 2);
 
-      if (body.id === state.targetId) {
+      if (isTarget) {
         ctx.beginPath();
-        ctx.arc(px, py, r + 18, 0, Math.PI * 2);
+        ctx.arc(px, py, r + 16, 0, Math.PI * 2);
         ctx.strokeStyle = "#ffd27a";
         ctx.lineWidth = 2.5;
         ctx.setLineDash([5, 4]);
         ctx.stroke();
         ctx.setLineDash([]);
       }
-
       ctx.restore();
     }
 
-    // Mini radar (always on) — shows where planets are relative to aim
     drawRadar(w, h);
-
-    updateHud(nearestBright || nearest);
+    updateHud(nearestPointlike || nearest);
     updateGuide();
-    updatePlanetChips();
+    updateObjectList();
     updateDebug();
+  }
+
+  function drawEclipticBand(w, h) {
+    if (state.heading == null || state.pitch == null || !X() || state.lat == null) return;
+    if (typeof Astronomy === "undefined") return;
+    const Ex = X();
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 210, 122, 0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    for (let lon = 0; lon <= 360; lon += 4) {
+      try {
+        const hor = Ex.eclipticToHorizon(lon, 0, time, observer);
+        if (hor.altitude < -15) {
+          started = false;
+          continue;
+        }
+        const fake = { az: hor.azimuth, alt: hor.altitude };
+        const p = project(fake);
+        if (!p || !p.inFov) {
+          started = false;
+          continue;
+        }
+        if (!started) {
+          ctx.moveTo(p.x, p.y);
+          started = true;
+        } else ctx.lineTo(p.x, p.y);
+      } catch (_) {
+        started = false;
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawRadar(w, h) {
     const cx = w - 58;
-    const cy = 100 + (parseInt(getComputedStyle(document.documentElement).getPropertyValue("--safe-t")) || 0);
+    const cy = 108;
     const R = 44;
     ctx.save();
-    ctx.globalAlpha = 0.9;
+    ctx.globalAlpha = 0.92;
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 1;
     ctx.stroke();
-    // cross
     ctx.beginPath();
     ctx.moveTo(cx - R, cy);
     ctx.lineTo(cx + R, cy);
@@ -685,7 +774,6 @@
     ctx.lineTo(cx, cy + R);
     ctx.stroke();
 
-    // FOV wedge
     if (state.heading != null) {
       const fov = viewFov();
       const half = ((fov.h / 2) * Math.PI) / 180;
@@ -693,26 +781,25 @@
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, R, -Math.PI / 2 - half, -Math.PI / 2 + half);
       ctx.closePath();
-      ctx.fillStyle = "rgba(126,182,255,0.2)";
+      ctx.fillStyle = "rgba(126,182,255,0.18)";
       ctx.fill();
     }
 
-    for (const body of state.bodies) {
-      if (body.alt < 0) continue;
-      if (state.heading == null) break;
-      const dAz = deltaAngle(state.heading, body.az);
-      // map ±90° az to radar edge; alt → radius (zenith center-ish, horizon edge)
-      const rr = R * (1 - Math.max(0, Math.min(90, body.alt)) / 100);
-      const rad = ((dAz) * Math.PI) / 180;
-      // 0 dAz = up on radar
+    for (const obj of state.objects) {
+      if (obj.alt < 0 || state.heading == null) continue;
+      if (obj.kind === "nakshatra" && !state.layers.nakshatra) continue;
+      // Only show graha, iss, rasi centers on radar (less clutter)
+      if (obj.kind === "nakshatra") continue;
+      const dAz = deltaAngle(state.heading, obj.az);
+      const rr = R * (1 - Math.max(0, Math.min(90, obj.alt)) / 100);
+      const rad = (dAz * Math.PI) / 180;
       const x = cx + Math.sin(rad) * rr;
       const y = cy - Math.cos(rad) * rr;
       ctx.beginPath();
-      ctx.arc(x, y, body.mag != null && body.mag < 0 ? 3.5 : 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = body.color;
+      ctx.arc(x, y, obj.kind === "iss" ? 3.5 : 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = obj.color;
       ctx.fill();
     }
-    // center = your aim
     ctx.beginPath();
     ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
     ctx.fillStyle = "#fff";
@@ -734,43 +821,39 @@
     if (state.heading == null || state.pitch == null) {
       els.pointingMain.textContent = "Aim phone at sky";
       els.pointingSub.textContent = state.orientReady
-        ? "Waiting for compass… wave phone in a figure‑8"
-        : "Compass not ready — allow Motion";
+        ? "Wave phone in a figure‑8 for compass"
+        : "Allow Motion";
       return;
     }
-
-    const dir = compassLabel(state.heading);
     const thr = lookAtThreshold();
-    const elev = state.pitch.toFixed(0) + "° elev";
-
-    if (nearest && nearest.angDist < thr && nearest.body.alt > -1) {
-      els.pointingMain.textContent = nearest.body.label;
+    const dir = compassLabel(state.heading);
+    if (nearest && nearest.angDist < thr && nearest.obj.alt > -1) {
+      const o = nearest.obj;
+      els.pointingMain.textContent = o.label;
       els.pointingSub.textContent =
-        "Likely this · " +
-        nearest.angDist.toFixed(1) +
-        "° from center · " +
-        dir +
+        (o.sub || o.kind) +
         " · " +
-        nearest.body.alt.toFixed(0) +
-        "° alt" +
-        (nearest.body.mag != null ? " · mag " + nearest.body.mag.toFixed(1) : "");
+        nearest.angDist.toFixed(1) +
+        "° off center · " +
+        dir;
     } else {
-      const hint =
-        nearest && nearest.body.alt > 0
-          ? "Nearest " +
-            nearest.body.label +
-            " " +
-            nearest.angDist.toFixed(0) +
-            "° off · tap it below or calibrate"
-          : "No planet near crosshair";
-      els.pointingMain.textContent = dir + " · " + elev;
+      els.pointingMain.textContent =
+        dir + " · " + state.pitch.toFixed(0) + "° elev";
       els.pointingSub.textContent =
-        "hdg " + state.heading.toFixed(0) + "° · " + hint;
+        nearest && nearest.obj.alt > 0
+          ? "Nearest: " +
+            nearest.obj.label +
+            " (" +
+            nearest.obj.kind +
+            ") " +
+            nearest.angDist.toFixed(0) +
+            "° off"
+          : "No object near crosshair";
     }
   }
 
   function updateGuide() {
-    const target = state.bodies.find((b) => b.id === state.targetId);
+    const target = state.objects.find((o) => o.id === state.targetId);
     if (!target || state.heading == null || state.pitch == null) {
       els.guideArrow.classList.add("hidden");
       els.lockedBadge.classList.add("hidden");
@@ -784,39 +867,31 @@
       els.lockedBadge.classList.add("hidden");
       const shaft = els.guideArrow.querySelector(".arrow-shaft");
       if (shaft) shaft.style.transform = "rotate(180deg)";
-      els.guideText.textContent = target.label + " is below horizon";
+      els.guideText.textContent = target.label + " below horizon";
       els.guideMeta.textContent =
-        "Rises toward " +
-        compassLabel(target.az) +
-        " · az " +
-        target.az.toFixed(0) +
-        "° · alt " +
-        target.alt.toFixed(0) +
-        "°";
+        "Toward " + compassLabel(target.az) + " · alt " + target.alt.toFixed(0) + "°";
       return;
     }
 
     const p = project(target);
     if (!p) return;
 
-    const locked = p.angDist < lockThreshold();
-    if (locked) {
+    if (p.angDist < lockThreshold()) {
       els.guideArrow.classList.add("hidden");
       els.lockedBadge.classList.remove("hidden");
       els.lockedName.textContent = "Found · " + target.label;
       els.lockedDetail.textContent =
-        p.angDist.toFixed(1) +
-        "° from center · " +
-        compassLabel(target.az) +
+        (target.sub || "") +
         " · " +
+        p.angDist.toFixed(1) +
+        "° · " +
         target.alt.toFixed(0) +
-        "° up · zoom to confirm";
+        "° up";
       return;
     }
 
     els.lockedBadge.classList.add("hidden");
     els.guideArrow.classList.remove("hidden");
-
     const angleDeg = (Math.atan2(p.dAz, p.dAlt) * 180) / Math.PI;
     const shaft = els.guideArrow.querySelector(".arrow-shaft");
     if (shaft) shaft.style.transform = "rotate(" + angleDeg + "deg)";
@@ -824,121 +899,141 @@
     const absAz = Math.abs(p.dAz);
     const absAlt = Math.abs(p.dAlt);
     let hint;
-    if (absAz > absAlt * 1.2) {
-      hint = p.dAz > 0 ? "Turn right" : "Turn left";
-    } else if (absAlt > absAz * 1.2) {
-      hint = p.dAlt > 0 ? "Tilt up" : "Tilt down";
-    } else {
+    if (absAz > absAlt * 1.2) hint = p.dAz > 0 ? "Turn right" : "Turn left";
+    else if (absAlt > absAz * 1.2) hint = p.dAlt > 0 ? "Tilt up" : "Tilt down";
+    else
       hint =
-        (p.dAz > 0 ? "Right" : "Left") +
-        " + " +
-        (p.dAlt > 0 ? "up" : "down");
-    }
+        (p.dAz > 0 ? "Right" : "Left") + " + " + (p.dAlt > 0 ? "up" : "down");
 
     els.guideText.textContent = hint + " → " + target.label;
     els.guideMeta.textContent =
       p.angDist.toFixed(0) +
-      "° away · aim " +
+      "° · " +
       compassLabel(target.az) +
       " · " +
       target.alt.toFixed(0) +
-      "° elev";
+      "° elev" +
+      (target.kind ? " · " + target.kind : "");
   }
 
-  function updatePlanetChips() {
-    const chips = els.planetList.querySelectorAll(".planet-chip");
-    chips.forEach((chip) => {
-      const id = chip.dataset.id;
-      const body = state.bodies.find((b) => b.id === id);
-      if (!body) return;
+  function updateObjectList() {
+    if (!els.objectList) return;
+    const chips = els.objectList.querySelectorAll(".planet-chip");
+    // Rebuild if count/kind filter changed
+    const visible = state.objects.filter((o) => {
+      if (o.kind === "graha") return state.layers.graha;
+      if (o.kind === "nakshatra") return state.layers.nakshatra;
+      if (o.kind === "rasi") return state.layers.rasi;
+      if (o.kind === "iss") return state.layers.iss;
+      return true;
+    });
+
+    // Only list: all grahas, ISS, rasis; nakshatras above horizon or all if few
+    const listItems = visible.filter((o) => {
+      if (o.kind === "nakshatra") return o.alt > -5;
+      return true;
+    });
+
+    if (chips.length !== listItems.length) {
+      buildObjectList(listItems);
+      return;
+    }
+    listItems.forEach((obj, i) => {
+      const chip = chips[i];
+      if (!chip || chip.dataset.id !== obj.id) {
+        buildObjectList(listItems);
+        return;
+      }
       const meta = chip.querySelector(".meta");
-      const below = body.alt < 0;
-      chip.classList.toggle("below", below);
-      chip.classList.toggle("selected", state.targetId === id);
-      const p = project(body);
-      chip.classList.toggle("in-view", !!(p && p.inFov && body.alt > -1));
+      const p = project(obj);
+      chip.classList.toggle("below", obj.alt < 0);
+      chip.classList.toggle("selected", state.targetId === obj.id);
+      chip.classList.toggle("in-view", !!(p && p.inFov && obj.alt > -1));
       if (meta) {
-        meta.textContent = below
-          ? "Below · " + compassLabel(body.az)
-          : body.alt.toFixed(0) +
-            "° " +
-            compassLabel(body.az) +
-            (p && state.heading != null ? " · " + p.angDist.toFixed(0) + "°" : "") +
-            (body.mag != null ? " · m" + body.mag.toFixed(1) : "");
+        meta.textContent =
+          (obj.alt < 0 ? "Below · " : obj.alt.toFixed(0) + "° · ") +
+          compassLabel(obj.az) +
+          (p && state.heading != null ? " · " + p.angDist.toFixed(0) + "°" : "");
       }
     });
+  }
+
+  function buildObjectList(items) {
+    if (!els.objectList) return;
+    if (!items) {
+      items = state.objects.filter((o) => {
+        if (o.kind === "nakshatra") return o.alt > -5 && state.layers.nakshatra;
+        if (o.kind === "graha") return state.layers.graha;
+        if (o.kind === "rasi") return state.layers.rasi;
+        if (o.kind === "iss") return state.layers.iss;
+        return true;
+      });
+    }
+    els.objectList.innerHTML = "";
+    for (const obj of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "planet-chip kind-" + obj.kind;
+      btn.dataset.id = obj.id;
+      btn.innerHTML =
+        '<span class="name"><span class="dot" style="background:' +
+        obj.color +
+        '"></span>' +
+        obj.label +
+        '</span><span class="kind-tag">' +
+        obj.kind +
+        '</span><span class="meta">—</span>';
+      btn.addEventListener("click", () => {
+        state.targetId = state.targetId === obj.id ? null : obj.id;
+        updateGuide();
+        updateObjectList();
+      });
+      els.objectList.appendChild(btn);
+    }
   }
 
   function updateDebug() {
     if (!els.debugLine) return;
     const fov = viewFov();
+    const iss =
+      state.iss && state.layers.iss
+        ? " · ISS " + state.iss.alt.toFixed(0) + "°"
+        : state.issError
+          ? " · ISS err"
+          : "";
     els.debugLine.textContent =
-      "aim hdg " +
+      "hdg " +
       (state.heading != null ? state.heading.toFixed(1) : "—") +
       "° · elev " +
       (state.pitch != null ? state.pitch.toFixed(1) : "—") +
       "° · FOV " +
       fov.h.toFixed(0) +
-      "×" +
-      fov.v.toFixed(0) +
-      " · z" +
-      state.zoom.toFixed(1) +
-      (state.accM != null ? " · GPS±" + Math.round(state.accM) + "m" : "");
+      "° · aya " +
+      (state._aya != null ? state._aya.toFixed(2) + "°" : "—") +
+      " Lahiri" +
+      iss;
   }
 
-  function buildPlanetList() {
-    els.planetList.innerHTML = "";
-    for (const b of BODIES) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "planet-chip";
-      btn.dataset.id = b.id;
-      btn.setAttribute("role", "option");
-      btn.innerHTML =
-        '<span class="name"><span class="dot" style="background:' +
-        b.color +
-        ";color:" +
-        b.color +
-        '"></span>' +
-        b.label +
-        '</span><span class="meta">—</span>';
-      btn.addEventListener("click", () => {
-        state.targetId = state.targetId === b.id ? null : b.id;
-        updateGuide();
-        updatePlanetChips();
-      });
-      els.planetList.appendChild(btn);
-    }
-  }
-
-  /**
-   * One-tap calibrate: assumes the selected target (or nearest bright body)
-   * is currently under the crosshair. Adjusts heading + pitch offsets.
-   */
   function calibrateToAim() {
-    let body = state.bodies.find((b) => b.id === state.targetId);
+    let body = state.objects.find((o) => o.id === state.targetId);
     if (!body || body.alt < -2) {
-      // Prefer Moon / Venus / Jupiter if up
-      body =
-        state.bodies.find(
-          (b) =>
-            b.alt > 5 &&
-            (b.id === "Moon" || b.id === "Venus" || b.id === "Jupiter" || b.id === "Sun")
-        ) || state.bodies.find((b) => b.alt > 10);
+      body = state.objects.find(
+        (o) =>
+          o.kind === "graha" &&
+          o.alt > 5 &&
+          (o.label === "Candra" || o.label === "Śukra" || o.label === "Guru" || o.label === "Sūrya")
+      );
     }
     if (!body || state.headingRaw == null || state.pitchRaw == null) {
-      setStatus("Pick a visible planet, center it, then Calibrate", "warn");
+      setStatus("Center Moon/Venus, select it, then Calibrate", "warn");
       return;
     }
-    // We want project(body) → center, so heading should equal body.az, pitch = body.alt
-    // heading = headingRaw + headingOffset  => offset = body.az - headingRaw
     state.headingOffset = deltaAngle(state.headingRaw, body.az);
     state.pitchOffset = body.alt - state.pitchRaw;
     state.heading = body.az;
     state.pitch = body.alt;
     state.smoothHeading = body.az;
     state.smoothPitch = body.alt;
-
     if (els.headingOffset) {
       els.headingOffset.value = String(
         Math.max(-45, Math.min(45, Math.round(state.headingOffset)))
@@ -953,16 +1048,19 @@
       els.pitchOffsetVal.textContent =
         (state.pitchOffset >= 0 ? "+" : "") + state.pitchOffset.toFixed(0) + "°";
     }
-    setStatus("Calibrated on " + body.label + " — keep phone level", "ok");
+    setStatus("Calibrated on " + body.label, "ok");
   }
 
   // ── Loop ─────────────────────────────────────────────────────────────
 
   function tick(ts) {
     if (!state.running) return;
-    if (ts - state.lastBodyCompute > 400) {
-      computeBodies();
+    if (ts - state.lastBodyCompute > 500) {
+      computeSky();
       state.lastBodyCompute = ts;
+    }
+    if (ts - state.lastIssFetch > 4000) {
+      refreshISS(false);
     }
     draw();
     requestAnimationFrame(tick);
@@ -973,26 +1071,21 @@
     els.btnGateStart.disabled = true;
     els.btnStart.disabled = true;
     setStatus("Permissions…", "warn");
-
     try {
+      if (!X()) throw new Error("SkyExtras failed to load.");
       await requestOrientationPermission();
       startOrientation();
       setStatus("High-accuracy GPS…", "warn");
       await getLocation();
-      setStatus("Rear camera…", "warn");
+      setStatus("Camera…", "warn");
       await startCamera();
-      computeBodies();
+      await refreshISS(true);
+      computeSky();
+      buildObjectList();
       state.running = true;
       els.gate.classList.add("hidden");
-      setLocChip();
-      setStatus("Live · pinch to zoom · calibrate on Moon if off", "ok");
+      setStatus("Live · graha · nakṣatra · rāśi · ISS", "ok");
       requestAnimationFrame(tick);
-
-      setTimeout(() => {
-        if (state.heading == null) {
-          setStatus("Wave iPhone in a figure‑8 to wake compass", "warn");
-        }
-      }, 3000);
     } catch (err) {
       console.error(err);
       showGateError(err.message || String(err));
@@ -1002,10 +1095,21 @@
     }
   }
 
-  // ── Wire UI ──────────────────────────────────────────────────────────
+  function syncLayerButtons() {
+    els.layerBtns?.forEach((btn) => {
+      const layer = btn.getAttribute("data-layer");
+      btn.setAttribute("aria-pressed", state.layers[layer] ? "true" : "false");
+      btn.classList.toggle("active", !!state.layers[layer]);
+    });
+    if (els.listTitle) {
+      const on = Object.entries(state.layers)
+        .filter(([, v]) => v)
+        .map(([k]) => k);
+      els.listTitle.textContent = "Find · " + (on.join(" · ") || "none");
+    }
+  }
 
   function init() {
-    buildPlanetList();
     resizeCanvas();
     updateScreenAngle();
     window.addEventListener("resize", () => {
@@ -1023,9 +1127,22 @@
     els.btnClearTarget?.addEventListener("click", () => {
       state.targetId = null;
       updateGuide();
-      updatePlanetChips();
+      updateObjectList();
     });
     els.btnCalibrate?.addEventListener("click", calibrateToAim);
+
+    els.layerBtns?.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const layer = btn.getAttribute("data-layer");
+        state.layers[layer] = !state.layers[layer];
+        // Keep at least one layer on
+        if (!Object.values(state.layers).some(Boolean)) state.layers[layer] = true;
+        syncLayerButtons();
+        computeSky();
+        buildObjectList();
+      });
+    });
+    syncLayerButtons();
 
     els.headingOffset?.addEventListener("input", () => {
       const v = Number(els.headingOffset.value) || 0;
@@ -1036,7 +1153,6 @@
       }
       els.headingOffsetVal.textContent = (v >= 0 ? "+" : "") + v + "°";
     });
-
     els.pitchOffset?.addEventListener("input", () => {
       const v = Number(els.pitchOffset.value) || 0;
       state.pitchOffset = v;
@@ -1046,18 +1162,12 @@
       }
       els.pitchOffsetVal.textContent = (v >= 0 ? "+" : "") + v + "°";
     });
-
-    els.zoomSlider?.addEventListener("input", () => {
-      applyZoom(Number(els.zoomSlider.value));
-    });
+    els.zoomSlider?.addEventListener("input", () => applyZoom(Number(els.zoomSlider.value)));
     els.zoomBtns?.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        applyZoom(Number(btn.getAttribute("data-zoom")));
-      });
+      btn.addEventListener("click", () => applyZoom(Number(btn.getAttribute("data-zoom"))));
     });
 
-    // Do NOT seed a fake city location — wait for real GPS
-    setStatus("Tap Start · needs GPS + Motion + Camera", "muted");
+    setStatus("Tap Start · grahas · nakṣatras · rāśis · ISS", "muted");
   }
 
   if (document.readyState === "loading") {

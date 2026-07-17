@@ -119,6 +119,50 @@ html, body {
   min-width: 4.5rem;
   white-space: nowrap;
 }
+.layer-bar {
+  position: absolute;
+  left: 50%;
+  top: calc(5.6rem + var(--safe-t));
+  transform: translateX(-50%);
+  z-index: 22;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+  max-width: 96vw;
+  pointer-events: auto;
+}
+.layer-btn {
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,0.5);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.layer-btn.active {
+  color: #0a1020;
+  background: linear-gradient(135deg, #cfe3ff, #7eb6ff);
+  border-color: transparent;
+}
+.planet-chip .kind-tag {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pebble, #9aa8c7);
+  opacity: 0.85;
+}
+.planet-chip.kind-iss {
+  border-color: rgba(109, 255, 168, 0.45);
+}
+.planet-chip.kind-nakshatra .name { font-size: 0.8rem; }
+.planet-chip.kind-rasi .dot { border-radius: 2px; }
 .head-actions { display: flex; gap: 0.35rem; align-items: center; }
 .debug-line {
   margin: 0;

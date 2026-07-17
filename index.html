@@ -8,10 +8,10 @@
   <meta name="apple-mobile-web-app-title" content="Sky" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#050814" />
-  <meta name="description" content="Point your iPhone at the sky to find planets with live camera guides." />
+  <meta name="description" content="Find grahas, nakshatras, rasis and the ISS with your iPhone camera." />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <title>Sky · Find planets</title>
+  <title>Sky · Graha · Nakṣatra · ISS</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -30,7 +30,6 @@
       </div>
     </header>
 
-    <!-- Zoom (iPhone 15 Pro Max: 0.5 / 1 / 2 / 5) -->
     <div class="zoom-bar" aria-label="Zoom">
       <button type="button" class="zoom-btn" data-zoom="0.5">0.5</button>
       <button type="button" class="zoom-btn active" data-zoom="1">1×</button>
@@ -38,6 +37,14 @@
       <button type="button" class="zoom-btn" data-zoom="5">5×</button>
       <input type="range" id="zoomSlider" min="0.5" max="8" step="0.1" value="1" aria-label="Zoom slider" />
       <span id="zoomVal" class="zoom-val">1×</span>
+    </div>
+
+    <!-- Layer toggles -->
+    <div class="layer-bar" role="group" aria-label="Sky layers">
+      <button type="button" class="layer-btn active" data-layer="graha" aria-pressed="true">Graha</button>
+      <button type="button" class="layer-btn active" data-layer="nakshatra" aria-pressed="true">Nakṣatra</button>
+      <button type="button" class="layer-btn active" data-layer="rasi" aria-pressed="true">Rāśi</button>
+      <button type="button" class="layer-btn active" data-layer="iss" aria-pressed="true">ISS</button>
     </div>
 
     <div class="crosshair" aria-hidden="true">
@@ -63,18 +70,18 @@
     <div id="pointingHud" class="pointing-hud">
       <div class="hud-label">Looking toward</div>
       <div id="pointingMain" class="hud-main">—</div>
-      <div id="pointingSub" class="hud-sub">Enable location &amp; compass</div>
+      <div id="pointingSub" class="hud-sub">Graha · nakṣatra · rāśi · ISS</div>
     </div>
 
     <footer class="bottom-sheet">
       <div class="sheet-head">
-        <h1>Find a planet</h1>
+        <h1 id="listTitle">Find · graha · nakṣatra · rāśi · ISS</h1>
         <div class="head-actions">
           <button type="button" id="btnCalibrate" class="text-btn">Calibrate</button>
           <button type="button" id="btnClearTarget" class="text-btn hidden">Clear</button>
         </div>
       </div>
-      <div id="planetList" class="planet-list" role="listbox" aria-label="Planets"></div>
+      <div id="objectList" class="planet-list" role="listbox" aria-label="Sky objects"></div>
       <div class="sheet-foot">
         <label class="calib">
           Compass
@@ -90,27 +97,29 @@
       </div>
       <p id="debugLine" class="debug-line">—</p>
       <p class="disclaimer">
-        iPhone 15 Pro Max · high-accuracy GPS · pinch or 0.5/1/2/5× zoom.
-        If labels are offset: center the Moon (or Venus) in the crosshair → tap <strong>Calibrate</strong>.
+        Sidereal labels use <strong>Lahiri</strong> ayanāṃśa. Rāśi/nakṣatra markers sit on the ecliptic.
+        ISS from live orbit feed. Center Moon → <strong>Calibrate</strong> if compass drifts.
+        Pinch or 0.5/1/2/5× to zoom.
       </p>
     </footer>
 
     <div id="gate" class="gate">
       <div class="gate-card">
         <div class="gate-icon">☾</div>
-        <h2>Point at the sky</h2>
+        <h2>Sky guide</h2>
         <p>
-          Uses precise GPS, the rear camera, and compass on your iPhone.
-          Zoom in to lock planets; calibrate once if the compass is off.
+          Point your iPhone to find <strong>grahas</strong> (incl. Rāhu/Ketu),
+          <strong>nakṣatras</strong>, <strong>rāśis</strong>, and the <strong>ISS</strong>
+          with arrows and live camera overlays.
         </p>
         <ul class="gate-needs">
-          <li>Camera (rear) + zoom</li>
-          <li>Precise Location (on for Safari)</li>
-          <li>Motion &amp; compass</li>
+          <li>Rear camera + zoom</li>
+          <li>Precise Location</li>
+          <li>Motion / compass</li>
         </ul>
         <p class="ios-hint">
-          <strong>iPhone 15 Pro Max:</strong> Settings → Privacy → Location Services → Safari → <strong>While Using</strong> + Precise Location <strong>On</strong>.
-          Wave the phone in a figure‑8 after start if the compass is sleepy.
+          Safari · Location Services → Precise On · wave phone in a figure‑8 after start.
+          Toggle layers: Graha · Nakṣatra · Rāśi · ISS.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
         <p id="gateError" class="error" hidden></p>
@@ -119,6 +128,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+  <script src="astro-extras.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
