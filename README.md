@@ -1,43 +1,39 @@
 # Raman Sky Guide
 
-Point your device at the sky. Find grahas, nakṣatras, rāśis, and constellations.
+Find grahas, nakṣatras, rāśis, and constellations in the sky.
 
 Uses **Raman** ayanāṃśa only.
 
 ## Live
 
-https://taem-jyothisha.github.io/sky-planet-finder/?v=21
+https://taem-jyothisha.github.io/sky-planet-finder/?v=22
 
-| Device | Browser |
-|--------|---------|
-| Android phone / tablet | **Chrome** |
-| iPhone / iPad | **Safari** |
-| Other | Any modern browser over HTTPS |
+Works on **any modern browser** (phone, tablet, computer):
 
-Android does not use Safari. Use Chrome there.
+| Device | How to look |
+|--------|-------------|
+| Phone / tablet with sensors | Point the device, or drag |
+| Phone without sensors | Drag on the screen |
+| Computer / laptop | Drag, scroll, arrow keys |
 
-## How to open
+## Open
 
-1. Open the link in the browser above (not a random in-app browser if you can avoid it).
+1. Open the link (HTTPS).
 2. Tap **Allow & start**.
-3. Allow **Location** and **Motion / orientation** when asked.
-4. Camera is optional (Menu → Camera). Off by default.
+3. Allow location if asked (helps sky math).
+4. Motion sensors are optional. Drag always works.
 
 ## Controls
 
-- **☰** layers, zoom, align, trim
-- **⌕** find a target
-- **◎** recalibrate sensors
+- **Drag** — look around  
+- **Arrow keys / WASD** — pan (keyboard)  
+- **Scroll** — tilt up/down (Shift+scroll = zoom)  
+- **☰** — layers, zoom, align  
+- **⌕** — find a target  
+- **◎** — recalibrate / unlock sensors after freehand look  
+
+Camera is optional (Menu → Camera).
 
 ## Defaults
 
-Graha, zodiac belt, and nakṣatra on. Preferences are saved in the browser.
-
-## Files
-
-- `index.html` shell
-- `app.js` sensors and drawing
-- `astro-extras.js` Raman math
-- `stars-constellations.js` stick figures
-- `constellation-art.js` figure outlines
-- `manifest.json` install / home screen
+Graha, zodiac belt, nakṣatra on. Preferences saved in the browser.

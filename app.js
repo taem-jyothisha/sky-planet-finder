@@ -347,6 +347,17 @@
     if (headingRaw == null || pitchRaw == null) return;
     if (Number.isNaN(headingRaw) || Number.isNaN(pitchRaw)) return;
 
+    // Manual look (drag/keys/desktop) blocks live sensors until recalibrate
+    const src = source || "?";
+    if (
+      state.manualLock &&
+      src !== "manual" &&
+      src !== "align" &&
+      src !== "seed"
+    ) {
+      return;
+    }
+
     const prevH = state.headingRaw;
     const prevP = state.pitchRaw;
     const dH = prevH == null ? 99 : Math.abs(deltaAngle(prevH, headingRaw));
@@ -355,9 +366,11 @@
 
     state.headingRaw = headingRaw;
     state.pitchRaw = Math.max(-89, Math.min(89, pitchRaw));
-    state.orientSource = source || state.orientSource || "?";
+    state.orientSource = src;
     state.orientReady = true;
-    state.orientEventCount = (state.orientEventCount || 0) + 1;
+    if (src !== "manual" && src !== "seed" && src !== "align") {
+      state.orientEventCount = (state.orientEventCount || 0) + 1;
+    }
     // Only mark "fresh orient sample" when values actually change (enables gyro rescue)
     if (moved) {
       state.lastOrientTs = performance.now();
@@ -365,12 +378,156 @@
     }
 
     // Fast tracking — high alpha so pan feels live
-    const hTarget = norm360(headingRaw + state.headingOffset + (state.northBias || 0));
-    const pTarget = state.pitchRaw + state.pitchOffset;
-    state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, 0.85);
-    state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, 0.85);
+    const useBias = src !== "manual" && src !== "seed";
+    const hTarget = norm360(
+      headingRaw + state.headingOffset + (useBias ? state.northBias || 0 : 0)
+    );
+    const pTarget =
+      state.pitchRaw + (useBias || src === "align" ? state.pitchOffset : 0);
+    const alpha = src === "manual" ? 1 : 0.85;
+    state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, alpha);
+    state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, alpha);
     state.heading = state.smoothHeading;
     state.pitch = state.smoothPitch;
+  }
+
+  /** Seed a sky view so any device draws immediately (no sensors required). */
+  function seedLookIfNeeded() {
+    if (state.heading != null && state.pitch != null) return;
+    // South, mild elevation — fine for map mode on desktop/laptop
+    applyAim(180, 35, "seed");
+  }
+
+  function setManualLook(on, msg) {
+    state.manualLock = !!on;
+    if (on) {
+      seedLookIfNeeded();
+      document.body.classList.add("manual-look");
+      if (msg) setStatus(msg, "ok");
+    } else {
+      document.body.classList.remove("manual-look");
+    }
+  }
+
+  function isUiChrome(el) {
+    if (!el || !el.closest) return false;
+    return !!el.closest(
+      "button, a, input, label, select, textarea, .map-panel, .find-panel, .gate, .info-card, .align-banner, .chrome-btn, .guide-dock"
+    );
+  }
+
+  function clientXY(ev) {
+    if (ev.touches && ev.touches[0]) {
+      return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+    }
+    if (ev.changedTouches && ev.changedTouches[0]) {
+      return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
+    }
+    return { x: ev.clientX, y: ev.clientY };
+  }
+
+  /** Drag / trackpad pan — works on phones without sensors, tablets, desktops */
+  function onLookPointerDown(ev) {
+    if (!state.running) return;
+    if (state.layersOpen || state.findOpen) return;
+    if (isUiChrome(ev.target)) return;
+    if (ev.touches && ev.touches.length >= 2) return;
+    if (ev.button != null && ev.button !== 0) return;
+    const p = clientXY(ev);
+    state._lookDrag = {
+      x: p.x,
+      y: p.y,
+      h: state.heading != null ? state.heading : 180,
+      p: state.pitch != null ? state.pitch : 35,
+    };
+    try {
+      if (ev.pointerId != null && ev.target && ev.target.setPointerCapture) {
+        ev.target.setPointerCapture(ev.pointerId);
+      }
+    } catch (_) {}
+  }
+
+  function onLookPointerMove(ev) {
+    const d = state._lookDrag;
+    if (!d) return;
+    if (ev.touches && ev.touches.length >= 2) {
+      state._lookDrag = null;
+      return;
+    }
+    const p = clientXY(ev);
+    const { w, h } = cssSize();
+    const fov = viewFov();
+    const dAz = ((p.x - d.x) / Math.max(1, w)) * fov.h;
+    const dAlt = -((p.y - d.y) / Math.max(1, h)) * fov.v;
+    setManualLook(true, null);
+    applyAim(norm360(d.h - dAz), Math.max(-85, Math.min(85, d.p + dAlt)), "manual");
+    if (ev.cancelable && (ev.pointerType === "touch" || ev.touches)) {
+      try {
+        ev.preventDefault();
+      } catch (_) {}
+    }
+  }
+
+  function onLookPointerUp() {
+    state._lookDrag = null;
+  }
+
+  function onLookWheel(ev) {
+    if (!state.running) return;
+    if (state.layersOpen || state.findOpen) return;
+    if (isUiChrome(ev.target)) return;
+    ev.preventDefault();
+    seedLookIfNeeded();
+    setManualLook(true, null);
+    const h0 = state.heading != null ? state.heading : 180;
+    const p0 = state.pitch != null ? state.pitch : 35;
+    if (ev.shiftKey) {
+      // Shift+wheel = zoom
+      applyZoom((state.zoom || 1) * (ev.deltaY > 0 ? 0.92 : 1.08));
+    } else if (ev.altKey || ev.ctrlKey) {
+      // Alt/Ctrl+wheel = yaw
+      applyAim(norm360(h0 + (ev.deltaY > 0 ? 4 : -4)), p0, "manual");
+    } else {
+      // Wheel = pitch
+      applyAim(h0, Math.max(-85, Math.min(85, p0 - ev.deltaY * 0.04)), "manual");
+    }
+  }
+
+  function onLookKey(ev) {
+    if (!state.running) return;
+    if (ev.target && /input|textarea|select/i.test(ev.target.tagName)) return;
+    const step = ev.shiftKey ? 8 : 3;
+    let h = state.heading != null ? state.heading : 180;
+    let p = state.pitch != null ? state.pitch : 35;
+    let used = true;
+    switch (ev.key) {
+      case "ArrowLeft":
+      case "a":
+      case "A":
+        h = norm360(h - step);
+        break;
+      case "ArrowRight":
+      case "d":
+      case "D":
+        h = norm360(h + step);
+        break;
+      case "ArrowUp":
+      case "w":
+      case "W":
+        p = Math.min(85, p + step);
+        break;
+      case "ArrowDown":
+      case "s":
+      case "S":
+        p = Math.max(-85, p - step);
+        break;
+      default:
+        used = false;
+    }
+    if (!used) return;
+    ev.preventDefault();
+    setManualLook(true, null);
+    applyAim(h, p, "manual");
   }
 
   function compassToLookAz(compass) {
@@ -577,28 +734,24 @@
     scheduleSensorHealthCheck();
   }
 
-  function sensorHelpText() {
-    if (PLATFORM.iOS) {
-      return "No sensors. On iPhone: Settings → Safari → Motion & Orientation, then ◎";
-    }
-    if (PLATFORM.android) {
-      return "No sensors. On Android: open in Chrome, allow motion if asked, then ◎";
-    }
-    return "No orientation sensors. Use a phone or tablet, or Align manually.";
-  }
-
   function scheduleSensorHealthCheck() {
     setTimeout(() => {
       if (!state.running) return;
       const moved = performance.now() - (state.lastAimMoveTs || 0) < 3000;
-      if ((state.orientEventCount || 0) < 2 && (state.motionEventCount || 0) < 2) {
-        setStatus(sensorHelpText(), "warn");
-      } else if (!moved && !state.orientReady) {
-        setStatus("Wave the device in a figure-8", "warn");
-      } else if (state.orientReady) {
-        setStatus("Sensors live", "ok");
+      const hasSensor =
+        (state.orientEventCount || 0) >= 2 || (state.motionEventCount || 0) >= 2;
+      if (!hasSensor) {
+        // Any device without sensors still works: drag / keys
+        setManualLook(
+          true,
+          "Drag to look around. Arrow keys work too. Sensors optional."
+        );
+      } else if (!moved && !state.orientReady && !state.manualLock) {
+        setStatus("Wave the device in a figure-8, or drag to look", "warn");
+      } else if (state.orientReady && !state.manualLock) {
+        setStatus("Sensors live. Drag anytime to look freehand.", "ok");
       }
-    }, 2800);
+    }, 2500);
   }
 
   /**
@@ -628,6 +781,8 @@
     state.motionEventCount = 0;
     state._lastCompass = null;
     state.lastAimMoveTs = 0;
+    state.manualLock = false;
+    document.body.classList.remove("manual-look");
     try {
       localStorage.removeItem("skyAlign");
     } catch (_) {}
@@ -677,7 +832,13 @@
     state.starCacheAt = 0;
     state.fieldCacheAt = 0;
 
-    setStatus("Wave device in a figure-8, then Align on the Moon", "ok");
+    seedLookIfNeeded();
+    setStatus(
+      PLATFORM.mobile
+        ? "Wave in a figure-8 for sensors, or drag to look. Align on Moon if needed."
+        : "Drag to look around. Arrow keys: pan. ◎ resets.",
+      "ok"
+    );
     els.alignBanner?.classList.remove("hidden");
     if (btn) {
       btn.classList.remove("spinning");
@@ -2132,14 +2293,17 @@
       drawPlanetariumSky(w, h);
     }
 
-    // Sensor dead → tell user overlays cannot track
-    if (!state.orientReady) {
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(w * 0.1, h * 0.42, w * 0.8, 48);
+    // No aim yet → seed so sky still draws on any device
+    if (state.heading == null || state.pitch == null) {
+      seedLookIfNeeded();
+    }
+    if (!state.orientReady && !state.manualLock) {
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(w * 0.08, h * 0.42, w * 0.84, 52);
       ctx.fillStyle = "#ffd27a";
       ctx.font = "700 14px -apple-system, system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("Waiting for motion… pan the phone", w / 2, h * 0.42 + 30);
+      ctx.fillText("Drag to look · or allow motion sensors", w / 2, h * 0.42 + 32);
       ctx.textAlign = "start";
     }
 
@@ -3420,8 +3584,18 @@
       savePrefs();
       updateLayerChrome();
 
+      // Always have a sky view (laptop, desktop, locked sensors, etc.)
+      seedLookIfNeeded();
+      if (PLATFORM.desktop || !PLATFORM.mobile) {
+        setManualLook(true, null);
+      }
+
       setStatus(
-        notes.length ? "Live with limits: " + notes.join(", ") : "Live. Pan the sky.",
+        notes.length
+          ? "Live with limits: " + notes.join(", ") + ". Drag to look."
+          : PLATFORM.mobile
+            ? "Live. Point the device, or drag to look."
+            : "Live. Drag to look around. Arrow keys pan.",
         notes.length ? "warn" : "ok"
       );
       syncGuidingUi();
@@ -3480,12 +3654,28 @@
 
     const app = document.getElementById("app");
     if (app) {
-      // Pinch zoom (touch). Safe on iOS, Android, iPad.
+      // Pinch zoom (touch)
       app.addEventListener("touchstart", onTouchStart, { passive: true });
       app.addEventListener("touchmove", onTouchMove, { passive: false });
       app.addEventListener("touchend", onTouchEnd, { passive: true });
       app.addEventListener("touchcancel", onTouchEnd, { passive: true });
+      // Drag to look (mouse + touch + pen) — any device
+      if (window.PointerEvent) {
+        app.addEventListener("pointerdown", onLookPointerDown, { passive: true });
+        app.addEventListener("pointermove", onLookPointerMove, { passive: false });
+        app.addEventListener("pointerup", onLookPointerUp, { passive: true });
+        app.addEventListener("pointercancel", onLookPointerUp, { passive: true });
+      } else {
+        app.addEventListener("mousedown", onLookPointerDown);
+        window.addEventListener("mousemove", onLookPointerMove);
+        window.addEventListener("mouseup", onLookPointerUp);
+        app.addEventListener("touchstart", onLookPointerDown, { passive: true });
+        app.addEventListener("touchmove", onLookPointerMove, { passive: false });
+        app.addEventListener("touchend", onLookPointerUp, { passive: true });
+      }
+      app.addEventListener("wheel", onLookWheel, { passive: false });
     }
+    window.addEventListener("keydown", onLookKey);
 
     // click works on all browsers after user gesture
     const bindStart = (el) => {

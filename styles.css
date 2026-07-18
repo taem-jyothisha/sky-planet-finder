@@ -41,6 +41,21 @@ html, body {
   min-height: 100dvh;
   min-height: -webkit-fill-available;
   overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+#app:active,
+body.manual-look #app {
+  cursor: grabbing;
+}
+/* Manual look hint (desktop / no sensors) */
+body.manual-look .brand-watermark {
+  opacity: 0.55;
+}
+body.manual-look .brand-watermark::after {
+  content: " · drag to look";
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 #camera {
