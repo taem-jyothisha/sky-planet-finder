@@ -579,10 +579,10 @@
 
   function sensorHelpText() {
     if (PLATFORM.iOS) {
-      return "No sensors. Settings → Safari (or app) → Motion & Orientation, then tap ◎";
+      return "No sensors. On iPhone: Settings → Safari → Motion & Orientation, then ◎";
     }
     if (PLATFORM.android) {
-      return "No sensors. Allow motion/orientation if asked. Use HTTPS. Then tap ◎";
+      return "No sensors. On Android: open in Chrome, allow motion if asked, then ◎";
     }
     return "No orientation sensors. Use a phone or tablet, or Align manually.";
   }
@@ -647,8 +647,10 @@
     } catch (err) {
       setStatus(
         PLATFORM.iOS
-          ? "Allow Motion in Safari Settings"
-          : "Allow motion/orientation permission",
+          ? "Allow Motion in iPhone Settings (Safari)"
+          : PLATFORM.android
+            ? "Allow motion/orientation in Chrome"
+            : "Allow motion/orientation permission",
         "warn"
       );
     }
@@ -3360,7 +3362,9 @@
 
     try {
       if (!window.isSecureContext) {
-        throw new Error("Need HTTPS. Open the github.io link in Chrome or Safari.");
+        throw new Error(
+          "Need HTTPS. Open the github.io link in your phone browser (Chrome on Android, Safari on iPhone)."
+        );
       }
       if (typeof Astronomy === "undefined") {
         throw new Error("Astronomy library failed to load. Check network, reload.");
@@ -3428,8 +3432,13 @@
       if (els.gate) els.gate.classList.remove("hidden");
       showGateError(
         msg +
-          "\n\nAllow Camera (if used), Location, and Motion/Orientation. " +
-          "Use Chrome or Safari over HTTPS. Precise location helps. Reload if stuck."
+          "\n\nAllow Location and Motion/Orientation. Camera only if you turn it on. " +
+          (PLATFORM.android
+            ? "Android: use Chrome. "
+            : PLATFORM.iOS
+              ? "iPhone/iPad: use Safari. "
+              : "") +
+          "Precise location helps. Reload if stuck."
       );
       setStatus("Start failed", "warn");
       state.running = false;
