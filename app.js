@@ -104,6 +104,7 @@
     zoomSlider: $("zoomSlider"),
     zoomChip: $("zoomChip"),
     matchBtn: $("matchBtn"),
+    visionChip: $("visionChip"),
     fovScale: $("fovScale"),
     fovScaleVal: $("fovScaleVal"),
     nudgePad: $("nudgePad"),
@@ -147,6 +148,15 @@
     /** Pixel shift of optical center (rare; most phones 0). */
     centerOffsetX: 0,
     centerOffsetY: 0,
+    /** Vision residual (°): additive pixel-truth trim on display aim (not folded into headingOffset). */
+    visionResH: 0,
+    visionResP: 0,
+    visionMode: "off", // off | hunt | track | locked | fail
+    visionEnabled: true,
+    _cvLastTs: 0,
+    _cvDet: null,
+    _cvLockMs: 0,
+    _cvMiss: 0,
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
@@ -449,10 +459,17 @@
       hTarget = norm360(headingRaw);
       pTarget = state.pitchRaw;
     } else {
+      // Sensors + user Align + compass bias + vision residual (pixel lock)
       hTarget = norm360(
-        headingRaw + (state.headingOffset || 0) + (state.northBias || 0)
+        headingRaw +
+          (state.headingOffset || 0) +
+          (state.northBias || 0) +
+          (state.visionResH || 0)
       );
-      pTarget = state.pitchRaw + (state.pitchOffset || 0);
+      pTarget =
+        state.pitchRaw +
+        (state.pitchOffset || 0) +
+        (state.visionResP || 0);
     }
 
     // Deadband: don't chase noise when zoomed (unless intentional big move)
@@ -686,10 +703,11 @@
     return c;
   }
 
-  /** Slow north bias when using matrix yaw — freeze while zoomed (bias creep = shake) */
+  /** Slow north bias when using matrix yaw — freeze while zoomed or vision-locked */
   function maybeUpdateNorthBias(matrixAz, compass) {
     if (compass == null) return;
     if ((state.zoom || 1) >= 1.8) return;
+    if (state.visionMode === "track" || state.visionMode === "locked") return;
     const now = performance.now();
     if (state._lastBiasTs && now - state._lastBiasTs < 400) return;
     const acc =
@@ -3743,31 +3761,28 @@
 
   /**
    * Align AR to the real sky: put the real Moon (etc.) under the +, then Align.
-   * Sets heading/pitch offsets so model body sits on the crosshair.
-   * Also nudges fovScale if the body was projected off-center before align
-   * (scale error vs pure shift).
+   * Coarse absolute: heading/pitch offsets. Vision residual zeroed (then CV re-trims).
    */
   function calibrateToAim() {
     const body = pickAlignBody();
     if (!body || state.headingRaw == null || state.pitchRaw == null) {
-      setStatus("Center the real Moon in the +, then Align", "warn");
+      setStatus("Center the real Moon in the +, then Match", "warn");
       els.alignBanner?.classList.remove("hidden");
       return;
     }
     if (state.heading == null || state.pitch == null) {
-      setStatus("Wait for sensors, then Align", "warn");
+      setStatus("Wait for sensors, then Match", "warn");
       return;
     }
 
-    // Where the model currently paints the body (before offset change)
     const before = project(body);
 
-    // Crosshair = current display aim. Map device raw → body sky position.
     state.northBias = 0;
+    state.visionResH = 0;
+    state.visionResP = 0;
     state.headingOffset = deltaAngle(state.headingRaw, body.az);
     state.pitchOffset = body.alt - state.pitchRaw;
 
-    // Snap display to body immediately (no lag / deadband hold on old aim)
     state.heading = body.az;
     state.pitch = body.alt;
     state.smoothHeading = body.az;
@@ -3776,8 +3791,9 @@
     state._steadyFrames = 0;
     state.manualLock = false;
     document.body.classList.remove("manual-look");
+    state.visionMode = "hunt";
+    state._cvLockMs = 0;
 
-    // If body was far from center but at similar elevation, FOV scale may be wrong
     if (before && before.angDist > 3 && before.angDist < 28) {
       const { w, h } = cssSize();
       const cx = w / 2;
@@ -3788,7 +3804,6 @@
         (before.angDist / (Math.min(before.fov.h, before.fov.v) / 2));
       if (rExp > 20 && rPx > 20) {
         const ratio = rPx / rExp;
-        // Only gentle auto FOV tweak (don't overfit noise)
         if (ratio > 0.7 && ratio < 1.4) {
           state.fovScale = Math.max(
             0.8,
@@ -3801,11 +3816,455 @@
     persistAlign();
     syncAlignSliders();
     state.targetId = body.id;
-    setStatus("Matched · " + body.label + " on +", "ok");
+    setStatus("Matched · vision refining…", "ok");
     els.alignBanner?.classList.add("hidden");
-    els.matchBtn?.classList.add("hidden");
     updateGuide();
     syncGuidingUi();
+    // Kick vision immediately for pixel lock
+    scheduleVisionTick(true);
+  }
+
+  // ── Vision lock: read camera pixels, pin overlay to real Moon ─────────
+
+  function getMoonBody() {
+    return (
+      state.objects.find(
+        (o) => o.kind === "graha" && o.label === "Candra" && o.alt > 2
+      ) || null
+    );
+  }
+
+  function expectedMoonRadiusCss(fov, cssW, cssH) {
+    // Moon ≈ 0.5° diameter
+    const degPerPx = Math.min(fov.h, fov.v) / Math.min(cssW, cssH);
+    return Math.max(2.5, 0.25 / Math.max(0.02, degPerPx));
+  }
+
+  /**
+   * Draw object-fit:cover crop of video into a small canvas (CSS-aligned space).
+   * Returns ImageData + mapping helpers, or null.
+   */
+  function sampleCoverFrame(maxW) {
+    const vid = els.camera;
+    if (!vid || !vid.videoWidth || vid.readyState < 2) return null;
+    const vw = vid.videoWidth;
+    const vh = vid.videoHeight;
+    const { w: sw, h: sh } = cssSize();
+    if (sw < 8 || sh < 8) return null;
+
+    // Same cover math as CSS object-fit: cover
+    const scale = Math.max(sw / vw, sh / vh);
+    const cropW = sw / scale;
+    const cropH = sh / scale;
+    const sx = (vw - cropW) / 2;
+    const sy = (vh - cropH) / 2;
+
+    const outW = Math.min(maxW || 240, sw);
+    const outH = Math.max(1, Math.round((outW * sh) / sw));
+
+    if (!state._cvCanvas) {
+      state._cvCanvas = document.createElement("canvas");
+      state._cvCtx = state._cvCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+    }
+    const c = state._cvCanvas;
+    const g = state._cvCtx;
+    c.width = outW;
+    c.height = outH;
+    try {
+      g.drawImage(vid, sx, sy, cropW, cropH, 0, 0, outW, outH);
+    } catch (_) {
+      return null;
+    }
+    let img;
+    try {
+      img = g.getImageData(0, 0, outW, outH);
+    } catch (_) {
+      return null; // tainted / security
+    }
+    return {
+      data: img.data,
+      w: outW,
+      h: outH,
+      toCssX: (x) => (x / outW) * sw,
+      toCssY: (y) => (y / outH) * sh,
+      sw,
+      sh,
+    };
+  }
+
+  /**
+   * Bright-blob Moon detector in downscaled cover frame.
+   * Prefers blobs near projected model position (rejects streetlights).
+   */
+  function detectMoonBlob(frame, rExpCss, predCss) {
+    if (!frame) return null;
+    const { data, w, h, toCssX, toCssY, sw, sh } = frame;
+    const rExp = (rExpCss / sw) * w; // in sample px
+    const rMin = Math.max(1.2, rExp * 0.35);
+    const rMax = Math.max(rMin + 1, rExp * 2.4);
+
+    // ROI around prediction (hunt larger)
+    let x0 = 0;
+    let y0 = 0;
+    let x1 = w;
+    let y1 = h;
+    if (predCss) {
+      const px = (predCss.x / sw) * w;
+      const py = (predCss.y / sh) * h;
+      const gate = Math.max(rExp * 8, w * 0.22);
+      x0 = Math.max(0, Math.floor(px - gate));
+      y0 = Math.max(0, Math.floor(py - gate));
+      x1 = Math.min(w, Math.ceil(px + gate));
+      y1 = Math.min(h, Math.ceil(py + gate));
+    }
+    // Ignore bottom strip (street lights)
+    y1 = Math.min(y1, Math.floor(h * 0.9));
+
+    // Luma stats for adaptive threshold
+    let sum = 0;
+    let sum2 = 0;
+    let n = 0;
+    let maxY = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y * w + x) * 4;
+        const Y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        sum += Y;
+        sum2 += Y * Y;
+        if (Y > maxY) maxY = Y;
+        n++;
+      }
+    }
+    if (n < 20) return null;
+    const mean = sum / n;
+    const std = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+    // Moon is a bright peak; require strong highlight
+    const thr = Math.max(mean + 2.2 * std, maxY * 0.72, 140);
+    if (maxY < 120) return null; // scene too dim / no moon
+
+    // Collect bright pixels, simple grid clustering (bins)
+    const bin = Math.max(2, Math.round(rExp * 0.6));
+    const cells = new Map();
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y * w + x) * 4;
+        const Y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (Y < thr) continue;
+        const bx = Math.floor(x / bin);
+        const by = Math.floor(y / bin);
+        const key = bx + "," + by;
+        let c = cells.get(key);
+        if (!c) {
+          c = { sx: 0, sy: 0, sY: 0, n: 0, maxY: 0 };
+          cells.set(key, c);
+        }
+        c.sx += x * Y;
+        c.sy += y * Y;
+        c.sY += Y;
+        c.n++;
+        if (Y > c.maxY) c.maxY = Y;
+      }
+    }
+    if (!cells.size) return null;
+
+    // Merge neighboring bins into blobs (union by proximity of centroids)
+    const seeds = [];
+    for (const c of cells.values()) {
+      if (c.n < 2) continue;
+      seeds.push({
+        x: c.sx / c.sY,
+        y: c.sy / c.sY,
+        mass: c.sY,
+        n: c.n,
+        maxY: c.maxY,
+      });
+    }
+    if (!seeds.length) return null;
+
+    // Greedy cluster merge
+    const used = new Array(seeds.length).fill(false);
+    const blobs = [];
+    const mergeR = rExp * 1.8;
+    for (let i = 0; i < seeds.length; i++) {
+      if (used[i]) continue;
+      let sx = seeds[i].x * seeds[i].mass;
+      let sy = seeds[i].y * seeds[i].mass;
+      let sm = seeds[i].mass;
+      let sn = seeds[i].n;
+      let mY = seeds[i].maxY;
+      used[i] = true;
+      let grew = true;
+      while (grew) {
+        grew = false;
+        const cx = sx / sm;
+        const cy = sy / sm;
+        for (let j = 0; j < seeds.length; j++) {
+          if (used[j]) continue;
+          const dx = seeds[j].x - cx;
+          const dy = seeds[j].y - cy;
+          if (dx * dx + dy * dy < mergeR * mergeR) {
+            used[j] = true;
+            sx += seeds[j].x * seeds[j].mass;
+            sy += seeds[j].y * seeds[j].mass;
+            sm += seeds[j].mass;
+            sn += seeds[j].n;
+            mY = Math.max(mY, seeds[j].maxY);
+            grew = true;
+          }
+        }
+      }
+      const cx = sx / sm;
+      const cy = sy / sm;
+      // Approx radius from area of bins
+      const area = sn * bin * bin;
+      const r = Math.sqrt(area / Math.PI);
+      if (r < rMin || r > rMax) continue;
+      blobs.push({ x: cx, y: cy, r, mass: sm, maxY: mY, n: sn });
+    }
+    if (!blobs.length) return null;
+
+    // Score: brightness × size fit × proximity to prediction
+    let best = null;
+    let bestScore = -1;
+    const predX = predCss ? (predCss.x / sw) * w : w / 2;
+    const predY = predCss ? (predCss.y / sh) * h : h / 2;
+    for (const b of blobs) {
+      const sizeFit = Math.exp(-Math.pow((b.r - rExp) / (rExp * 0.7), 2));
+      const dist = Math.hypot(b.x - predX, b.y - predY);
+      const prox = Math.exp(-dist / (rExp * 6));
+      const score = b.maxY * (0.4 + 0.6 * sizeFit) * (0.25 + 0.75 * prox);
+      if (score > bestScore) {
+        bestScore = score;
+        best = b;
+      }
+    }
+    if (!best || bestScore < 40) return null;
+
+    return {
+      x: toCssX(best.x),
+      y: toCssY(best.y),
+      r: (best.r / w) * sw,
+      score: bestScore,
+    };
+  }
+
+  function pixelErrorToVisionDelta(det, proj, fov, w, h, pitchDeg) {
+    // Pinhole inverse for det & proj → look-space error
+    const h2 = ((fov.h / 2) * Math.PI) / 180;
+    const v2 = ((fov.v / 2) * Math.PI) / 180;
+    const cosP = Math.max(0.15, Math.cos((pitchDeg * Math.PI) / 180));
+    const cx = w / 2 + (state.centerOffsetX || 0);
+    const cy = h / 2 + (state.centerOffsetY || 0);
+
+    function lookOf(x, y) {
+      const nx = (x - cx) / (w / 2);
+      const ny = (cy - y) / (h / 2);
+      const dAz =
+        (Math.atan(nx * Math.tan(h2)) * 180) / Math.PI / cosP;
+      const dAlt = (Math.atan(ny * Math.tan(v2)) * 180) / Math.PI;
+      return { dAz, dAlt };
+    }
+    const d = lookOf(det.x, det.y);
+    const p = lookOf(proj.x, proj.y);
+    // errAz > 0 ⇒ real moon is right of marker ⇒ need lower heading
+    // residual is added to heading: visionResH += −errAz
+    return {
+      dResH: -(d.dAz - p.dAz),
+      dResP: -(d.dAlt - p.dAlt),
+    };
+  }
+
+  function setVisionUi(mode, label) {
+    state.visionMode = mode;
+    document.body.classList.remove(
+      "vision-hunt",
+      "vision-track",
+      "vision-locked",
+      "vision-fail"
+    );
+    if (mode && mode !== "off") {
+      document.body.classList.add("vision-" + mode);
+    }
+    if (els.visionChip) {
+      if (mode === "off" || !state.overlays.camera) {
+        els.visionChip.classList.add("hidden");
+      } else {
+        els.visionChip.classList.remove("hidden");
+        els.visionChip.textContent = label || mode;
+        els.visionChip.dataset.mode = mode;
+      }
+    }
+  }
+
+  function shouldRunVision(body) {
+    if (!state.visionEnabled) return false;
+    if (!state.running || !state.overlays.camera) return false;
+    if (!body || body.alt < 3) return false;
+    if (state.heading == null || state.pitch == null) return false;
+    if (state.manualLock && state._lookDrag) return false;
+    if (document.hidden) return false;
+    const vid = els.camera;
+    if (!vid || vid.readyState < 2) return false;
+    return true;
+  }
+
+  function runVisionLock(force) {
+    const body = getMoonBody() || pickAlignBody();
+    if (!shouldRunVision(body)) {
+      if (!state.overlays.camera) setVisionUi("off");
+      return;
+    }
+    // Prefer Moon for CV
+    const moon = getMoonBody() || body;
+    if (!moon || moon.label !== "Candra") {
+      // Non-moon: only run if user targeted it and it's bright (Sun)
+      if (!force && moon.label !== "Sūrya") {
+        setVisionUi("off");
+        return;
+      }
+    }
+
+    const proj = project(moon);
+    if (!proj || !proj.inFov) {
+      setVisionUi("hunt", "Point at Moon…");
+      state._cvMiss++;
+      return;
+    }
+
+    const fov = viewFov();
+    const { w, h } = cssSize();
+    const rExp = expectedMoonRadiusCss(fov, w, h);
+    const frame = sampleCoverFrame(240);
+    if (!frame) {
+      setVisionUi("fail", "Camera…");
+      return;
+    }
+
+    setVisionUi(
+      state.visionMode === "locked" ? "locked" : "hunt",
+      state.visionMode === "locked" ? "Vision lock" : "Finding Moon…"
+    );
+
+    const det = detectMoonBlob(frame, rExp, { x: proj.x, y: proj.y });
+    if (!det) {
+      state._cvMiss = (state._cvMiss || 0) + 1;
+      if (state._cvMiss > 8) {
+        setVisionUi("fail", "Can’t see Moon");
+        // Decay residual slowly so we don't freeze wrong
+        state.visionResH *= 0.92;
+        state.visionResP *= 0.92;
+        state._cvLockMs = 0;
+      }
+      return;
+    }
+    state._cvMiss = 0;
+
+    // EMA on detection
+    if (state._cvDet) {
+      state._cvDet = {
+        x: state._cvDet.x * 0.55 + det.x * 0.45,
+        y: state._cvDet.y * 0.55 + det.y * 0.45,
+        r: state._cvDet.r * 0.6 + det.r * 0.4,
+        score: det.score,
+      };
+    } else {
+      state._cvDet = det;
+    }
+    const sm = state._cvDet;
+
+    // Gate: detection must be near model (unless huge initial offset — still allow up to 18°)
+    const gatePx =
+      (Math.min(w, h) / Math.min(fov.h, fov.v)) *
+      (state.visionMode === "locked" || state.visionMode === "track" ? 4 : 14);
+    const distPx = Math.hypot(sm.x - proj.x, sm.y - proj.y);
+    if (distPx > gatePx * 3 && state.visionMode !== "hunt") {
+      // Lost track
+      state._cvLockMs = 0;
+      setVisionUi("hunt", "Re-acquiring…");
+      return;
+    }
+
+    const delta = pixelErrorToVisionDelta(sm, proj, fov, w, h, state.pitch);
+    let dH = delta.dResH;
+    let dP = delta.dResP;
+    // Clamp per frame
+    const maxStep = state.visionMode === "locked" ? 0.35 : 1.8;
+    dH = Math.max(-maxStep, Math.min(maxStep, dH));
+    dP = Math.max(-maxStep, Math.min(maxStep, dP));
+
+    const err = Math.hypot(dH, dP);
+    if (!Number.isFinite(err)) return;
+
+    // EMA residual
+    const alpha = err > 2 ? 0.45 : err > 0.5 ? 0.32 : 0.18;
+    state.visionResH = (state.visionResH || 0) + alpha * dH;
+    state.visionResP = (state.visionResP || 0) + alpha * dP;
+    // Soft cap residual
+    state.visionResH = Math.max(-8, Math.min(8, state.visionResH));
+    state.visionResP = Math.max(-8, Math.min(8, state.visionResP));
+
+    // Apply immediately to display aim
+    if (state.heading != null && state.pitch != null) {
+      state.heading = norm360(state.heading + alpha * dH);
+      state.pitch = Math.max(
+        -89,
+        Math.min(89, state.pitch + alpha * dP)
+      );
+      state.smoothHeading = state.heading;
+      state.smoothPitch = state.pitch;
+    }
+
+    // FOV scale from moon size (slow)
+    if (sm.r > 3 && rExp > 3) {
+      const ratio = sm.r / rExp;
+      if (ratio > 0.55 && ratio < 1.8 && err < 1.5) {
+        state.fovScale = Math.max(
+          0.82,
+          Math.min(1.22, (state.fovScale || 1) * (0.92 + 0.08 * (1 / ratio)))
+        );
+      }
+    }
+
+    if (err < 0.28) {
+      state._cvLockMs = (state._cvLockMs || 0) + 280;
+      if (state._cvLockMs > 900) {
+        setVisionUi("locked", "Vision lock · " + moon.label);
+        // Promote residual into durable offsets so lock survives sensor noise
+        if (state._cvPromoted !== true) {
+          state.headingOffset = (state.headingOffset || 0) + (state.visionResH || 0);
+          state.pitchOffset = (state.pitchOffset || 0) + (state.visionResP || 0);
+          state.visionResH = 0;
+          state.visionResP = 0;
+          state._cvPromoted = true;
+          persistAlign();
+          syncAlignSliders();
+        }
+      } else {
+        setVisionUi("track", "Locking…");
+      }
+    } else {
+      state._cvLockMs = 0;
+      state._cvPromoted = false;
+      setVisionUi("track", "Aligning " + err.toFixed(1) + "°");
+    }
+
+    // Debug: store last det for draw
+    state._cvDrawDet = sm;
+  }
+
+  function scheduleVisionTick(force) {
+    const now = performance.now();
+    const interval =
+      state.visionMode === "locked" ? 700 : state.visionMode === "track" ? 320 : 260;
+    if (!force && state._cvLastTs && now - state._cvLastTs < interval) return;
+    state._cvLastTs = now;
+    try {
+      runVisionLock(!!force);
+    } catch (err) {
+      console.warn("vision", err);
+    }
   }
 
   /** Shift overlay by small degrees (fine match without full recalibrate). */
@@ -3894,31 +4353,38 @@
     } catch (_) {}
   }
 
-  /** Show Match chip when live camera + Moon (etc.) is near the view */
+  /** Match chip + vision status when live camera is on */
   function updateMatchChip() {
     const camOn = state.running && state.overlays.camera;
     if (els.nudgePad) {
       els.nudgePad.classList.toggle("hidden", !camOn);
     }
-    if (!els.matchBtn) return;
     if (!camOn) {
-      els.matchBtn.classList.add("hidden");
+      els.matchBtn?.classList.add("hidden");
+      setVisionUi("off");
       return;
     }
-    const body = pickAlignBody();
+    const moon = getMoonBody();
+    const body = moon || pickAlignBody();
     if (!body || state.heading == null) {
-      els.matchBtn.classList.add("hidden");
+      els.matchBtn?.classList.add("hidden");
       return;
     }
     const p = project(body);
-    // Offer match when body is on/near screen (user can see both real + overlay)
-    if (p && p.angDist < 40 && body.alt > -1) {
+    if (!els.matchBtn) return;
+    if (state.visionMode === "locked") {
+      els.matchBtn.classList.add("hidden");
+      return;
+    }
+    if (p && p.angDist < 45 && body.alt > -1) {
       els.matchBtn.classList.remove("hidden");
-      const gap = p.angDist.toFixed(0);
-      els.matchBtn.textContent =
-        p.angDist < 1.2
-          ? "✓ " + body.label + " matched"
-          : "Match " + body.label + " · " + gap + "° off";
+      if (state.visionMode === "fail") {
+        els.matchBtn.textContent = "Match " + body.label + " (manual)";
+      } else if (state.visionMode === "track" || state.visionMode === "hunt") {
+        els.matchBtn.textContent = "Force match · " + body.label;
+      } else {
+        els.matchBtn.textContent = "Match " + body.label;
+      }
     } else {
       els.matchBtn.classList.add("hidden");
     }
@@ -3933,6 +4399,9 @@
         computeSky();
         if (state.overlays.stars) computeStars();
         state.lastBodyCompute = ts;
+      }
+      if (state.overlays.camera) {
+        scheduleVisionTick(false);
       }
       if (ts - state.lastIssFetch > 4000) {
         refreshISS(false);
@@ -4252,12 +4721,12 @@
     });
     els.zoomChip?.addEventListener("click", () => applyZoom(1, { snap: true }));
     els.matchBtn?.addEventListener("click", () => {
-      // Prefer Moon as target when matching
-      const moon = state.objects.find(
-        (o) => o.kind === "graha" && o.label === "Candra" && o.alt > -2
-      );
+      const moon = getMoonBody();
       if (moon) state.targetId = moon.id;
+      state._cvPromoted = false;
+      state._cvDet = null;
       calibrateToAim();
+      scheduleVisionTick(true);
     });
     els.nudgePad?.querySelectorAll("[data-nudge]").forEach((btn) => {
       btn.addEventListener("click", (ev) => {

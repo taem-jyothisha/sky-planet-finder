@@ -19,7 +19,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=26" />
+  <link rel="stylesheet" href="styles.css?v=27" />
 </head>
 <body class="clean-ui">
   <div id="app">
@@ -47,12 +47,12 @@
         <h2 id="howtoTitle" class="howto-title">Raman Sky Guide</h2>
         <p class="howto-lead">Shows grahas, nakṣatras, and rāśis in the sky — right now, from where you are.</p>
         <ol class="howto-steps">
-          <li><strong>Point</strong> or drag to look.</li>
-          <li><strong>Pinch to zoom. Hold still.</strong> Center the + .</li>
-          <li>Tap <strong>⌕</strong> to find a graha or star.</li>
-          <li>Drift? <strong>◎</strong> then Align on the Moon.</li>
+          <li>Turn on <strong>Camera</strong>. Point at the Moon.</li>
+          <li>Hold still — <strong>vision lock</strong> pins sky to the video.</li>
+          <li>Or tap <strong>Match</strong> if auto can’t see it.</li>
+          <li>Pinch to zoom after lock. <strong>⌕</strong> finds other grahas.</li>
         </ol>
-        <p class="howto-note">Raman ayanāṃśa. Camera optional.</p>
+        <p class="howto-note">Camera + vision = pixel match. Raman ayanāṃśa.</p>
         <button type="button" id="btnHowtoGotIt" class="primary-btn wide">Got it</button>
       </div>
     </div>
@@ -62,6 +62,7 @@
       <span class="dot"></span>
     </div>
     <button type="button" id="zoomChip" class="zoom-chip hidden" aria-label="Reset zoom to 1x">1×</button>
+    <div id="visionChip" class="vision-chip hidden" data-mode="off" aria-live="polite">Vision</div>
     <button type="button" id="matchBtn" class="match-btn hidden" aria-label="Match overlay to real sky">Match Moon</button>
     <div id="nudgePad" class="nudge-pad hidden" aria-label="Fine adjust overlay">
       <button type="button" data-nudge="0,0.4" aria-label="Nudge up">▲</button>
@@ -248,9 +249,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=26"></script>
-  <script src="stars-constellations.js?v=26"></script>
-  <script src="constellation-art.js?v=26"></script>
-  <script src="app.js?v=26"></script>
+  <script src="astro-extras.js?v=27"></script>
+  <script src="stars-constellations.js?v=27"></script>
+  <script src="constellation-art.js?v=27"></script>
+  <script src="app.js?v=27"></script>
 </body>
 </html>

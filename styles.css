@@ -390,6 +390,62 @@ body.steady .crosshair .dot {
   box-shadow: 0 0 0 1px rgba(0,0,0,0.8);
 }
 
+/* Vision lock status */
+.vision-chip {
+  position: absolute;
+  z-index: 17;
+  top: calc(3.4rem + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 1.6rem;
+  padding: 0.22rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.55);
+  color: rgba(240,244,255,0.9);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+.vision-chip.hidden { display: none; }
+.vision-chip[data-mode="hunt"] {
+  color: #ffd27a;
+  border-color: rgba(255,210,122,0.4);
+  animation: vision-pulse 1.2s ease-in-out infinite;
+}
+.vision-chip[data-mode="track"] {
+  color: #ffd27a;
+  border-color: rgba(255,210,122,0.5);
+}
+.vision-chip[data-mode="locked"] {
+  color: #6dffa8;
+  border-color: rgba(109,255,168,0.55);
+}
+.vision-chip[data-mode="fail"] {
+  color: #ff9aa8;
+  border-color: rgba(255,120,140,0.4);
+}
+@keyframes vision-pulse {
+  50% { opacity: 0.55; }
+}
+
+body.vision-hunt .crosshair,
+body.vision-track .crosshair {
+  opacity: 0.65;
+}
+body.vision-locked .crosshair {
+  opacity: 0.95;
+}
+body.vision-locked .crosshair .dot {
+  background: #6dffa8;
+}
+body.vision-fail .crosshair .ring {
+  border-color: rgba(255,140,150,0.5);
+}
+
 /* Match real Moon → overlay */
 .match-btn {
   position: absolute;
