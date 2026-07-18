@@ -19,7 +19,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=25" />
 </head>
 <body class="clean-ui">
   <div id="app">
@@ -47,12 +47,12 @@
         <h2 id="howtoTitle" class="howto-title">Raman Sky Guide</h2>
         <p class="howto-lead">Shows grahas, nakṣatras, and rāśis in the sky — right now, from where you are.</p>
         <ol class="howto-steps">
-          <li><strong>Drag</strong> the sky to look around. Or point your phone.</li>
-          <li>Tap <strong>⌕</strong> → pick a graha (or constellation).</li>
-          <li>Tap <strong>☰</strong> for layers, Align, zoom.</li>
-          <li>Labels drift? Tap <strong>◎</strong>, then Align on the Moon.</li>
+          <li><strong>Point</strong> or drag to look.</li>
+          <li><strong>Pinch to zoom. Hold still.</strong> Center the + .</li>
+          <li>Tap <strong>⌕</strong> to find a graha or star.</li>
+          <li>Drift? <strong>◎</strong> then Align on the Moon.</li>
         </ol>
-        <p class="howto-note">Raman ayanāṃśa. Camera is optional (in menu).</p>
+        <p class="howto-note">Raman ayanāṃśa. Camera optional.</p>
         <button type="button" id="btnHowtoGotIt" class="primary-btn wide">Got it</button>
       </div>
     </div>
@@ -61,6 +61,7 @@
       <span class="ring"></span>
       <span class="dot"></span>
     </div>
+    <button type="button" id="zoomChip" class="zoom-chip hidden" aria-label="Reset zoom to 1x">1×</button>
 
     <div id="edgeLeft" class="edge-cue edge-left" aria-hidden="true">◀</div>
     <div id="edgeRight" class="edge-cue edge-right" aria-hidden="true">▶</div>
@@ -89,8 +90,8 @@
     </div>
 
     <div id="alignBanner" class="align-banner hidden">
-      <p>Center the real object in the crosshair, then Align.</p>
-      <button type="button" id="btnAlignQuick" class="primary-btn">Align now</button>
+      <p>Hold steady. Object in the + . Align.</p>
+      <button type="button" id="btnAlignQuick" class="primary-btn">Align</button>
     </div>
 
     <div id="pointingHud" class="pointing-hud clean-hide">
@@ -160,15 +161,15 @@
           Show star names
         </label>
         <div class="zoom-drawer" aria-label="Zoom">
-          <span class="zoom-drawer-label">Zoom</span>
+          <span class="zoom-drawer-label">Zoom · hold still</span>
           <div class="zoom-bar-inline">
-            <button type="button" class="zoom-btn" data-zoom="0.5">0.5</button>
             <button type="button" class="zoom-btn active" data-zoom="1">1</button>
             <button type="button" class="zoom-btn" data-zoom="2">2</button>
-            <button type="button" class="zoom-btn" data-zoom="5">5</button>
+            <button type="button" class="zoom-btn" data-zoom="3">3</button>
+            <button type="button" class="zoom-btn" data-zoom="4">4</button>
             <span id="zoomVal" class="zoom-val">1×</span>
           </div>
-          <input type="range" id="zoomSlider" min="0.5" max="8" step="0.1" value="1" aria-label="Zoom" />
+          <input type="range" id="zoomSlider" min="1" max="4" step="0.5" value="1" aria-label="Zoom" />
         </div>
         <label class="calib">
           Compass trim
@@ -233,9 +234,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=24"></script>
-  <script src="stars-constellations.js?v=24"></script>
-  <script src="constellation-art.js?v=24"></script>
-  <script src="app.js?v=24"></script>
+  <script src="astro-extras.js?v=25"></script>
+  <script src="stars-constellations.js?v=25"></script>
+  <script src="constellation-art.js?v=25"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>

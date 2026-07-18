@@ -8,6 +8,9 @@
   const X = () => window.SkyExtras;
   // Typical phone wide FOV at 1× (tuned per device via video aspect later)
   const BASE_H_FOV_1X = 60;
+  /** Soft cap for digital zoom — beyond this, shake ruins spotting */
+  const DIG_ZOOM_MAX = 4;
+  const ZOOM_STEPS = [1, 1.5, 2, 3, 4];
 
   /** Runtime platform (phones, tablets, desktop browsers) */
   const PLATFORM = (function detectPlatform() {
@@ -94,6 +97,7 @@
     zoomVal: $("zoomVal"),
     zoomBtns: document.querySelectorAll("[data-zoom]"),
     zoomSlider: $("zoomSlider"),
+    zoomChip: $("zoomChip"),
     debugLine: $("debugLine"),
     layerCards: document.querySelectorAll(".layer-card[data-layer]"),
     listTitle: $("listTitle"),
@@ -124,9 +128,11 @@
     headingOffset: 0,
     pitchOffset: 0,
     zoom: 1,
-    zoomMin: 0.5,
-    zoomMax: 8,
+    zoomMin: 1,
+    zoomMax: DIG_ZOOM_MAX,
     hardwareZoom: false,
+    zoomTarget: 1,
+    steady: false,
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
@@ -210,6 +216,54 @@
   function smoothLinear(prev, next, alpha) {
     if (prev == null || Number.isNaN(prev)) return next;
     return prev + (next - prev) * alpha;
+  }
+
+  /** Zoom-aware filter strength — high zoom must not track sensor noise */
+  function aimSmoothAlpha(src) {
+    if (src === "manual" || src === "align" || src === "seed") return 1;
+    const z = Math.max(1, state.zoom || 1);
+    // 1× ≈ 0.55 · 2× ≈ 0.28 · 4× ≈ 0.14
+    return Math.max(0.06, 0.55 / (1 + (z - 1) * 1.6));
+  }
+
+  /** Ignore micro-jitter (degrees) that would thrash the reticle when zoomed */
+  function aimDeadbandDeg() {
+    const z = Math.max(1, state.zoom || 1);
+    return 0.06 + (z - 1) * 0.18;
+  }
+
+  /** Cap how fast the sky can slew per frame when zoomed (° ) */
+  function aimMaxStepDeg() {
+    const z = Math.max(1, state.zoom || 1);
+    return Math.max(0.35, 4.5 / z);
+  }
+
+  function nearestZoomStep(z) {
+    let best = ZOOM_STEPS[0];
+    let bestD = Infinity;
+    for (const s of ZOOM_STEPS) {
+      const d = Math.abs(s - z);
+      if (d < bestD) {
+        bestD = d;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  function syncZoomChrome() {
+    const z = state.zoom || 1;
+    const zoomed = z >= 1.6;
+    document.body.classList.toggle("zoomed", zoomed);
+    document.body.classList.toggle("steady", !!state.steady);
+    if (els.zoomChip) {
+      els.zoomChip.classList.toggle("hidden", z < 1.15);
+      const label =
+        (Math.round(z * 10) / 10) +
+        "×" +
+        (state.steady ? " · steady" : zoomed ? " · hold still" : "");
+      els.zoomChip.textContent = label;
+    }
   }
 
   /**
@@ -394,10 +448,7 @@
     // Sensors: fuse raw + user Align offset + slow northBias.
     let hTarget;
     let pTarget;
-    if (src === "manual" || src === "seed") {
-      hTarget = norm360(headingRaw);
-      pTarget = state.pitchRaw;
-    } else if (src === "align") {
+    if (src === "manual" || src === "seed" || src === "align") {
       hTarget = norm360(headingRaw);
       pTarget = state.pitchRaw;
     } else {
@@ -406,11 +457,51 @@
       );
       pTarget = state.pitchRaw + (state.pitchOffset || 0);
     }
-    const alpha = src === "manual" || src === "align" ? 1 : 0.88;
+
+    // Deadband: don't chase noise when zoomed (unless intentional big move)
+    const z = Math.max(1, state.zoom || 1);
+    const db = aimDeadbandDeg();
+    if (src !== "manual" && src !== "align" && src !== "seed" && state.heading != null) {
+      const errH = Math.abs(deltaAngle(state.heading, hTarget));
+      const errP = Math.abs(pTarget - state.pitch);
+      if (errH < db && errP < db * 0.85) {
+        // Hold plate steady — this is the "spotting" mode
+        state.steady = z >= 1.8;
+        state._steadyFrames = (state._steadyFrames || 0) + 1;
+        syncZoomChrome();
+        return;
+      }
+      // Intentional pan: break steady
+      if (errH > db * 2.5 || errP > db * 2.2) {
+        state.steady = false;
+        state._steadyFrames = 0;
+      }
+    } else {
+      state.steady = false;
+      state._steadyFrames = 0;
+    }
+
+    // Rate-limit slew when zoomed so the sky doesn't thrash
+    if (
+      src !== "manual" &&
+      src !== "align" &&
+      state.smoothHeading != null &&
+      state.smoothPitch != null
+    ) {
+      const maxS = aimMaxStepDeg();
+      const dH2 = deltaAngle(state.smoothHeading, hTarget);
+      const dP2 = pTarget - state.smoothPitch;
+      if (Math.abs(dH2) > maxS) hTarget = norm360(state.smoothHeading + Math.sign(dH2) * maxS);
+      if (Math.abs(dP2) > maxS) pTarget = state.smoothPitch + Math.sign(dP2) * maxS;
+    }
+
+    const alpha = aimSmoothAlpha(src);
     state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, alpha);
     state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, alpha);
     state.heading = state.smoothHeading;
     state.pitch = state.smoothPitch;
+    if (z >= 1.8 && (state._steadyFrames || 0) > 8) state.steady = true;
+    syncZoomChrome();
   }
 
   /** Seed a sky view so any device draws immediately (no sensors required). */
@@ -598,9 +689,10 @@
     return c;
   }
 
-  /** Slow north bias when using matrix yaw — never skip just because compass is stable */
+  /** Slow north bias when using matrix yaw — freeze while zoomed (bias creep = shake) */
   function maybeUpdateNorthBias(matrixAz, compass) {
     if (compass == null) return;
+    if ((state.zoom || 1) >= 1.8) return;
     const now = performance.now();
     if (state._lastBiasTs && now - state._lastBiasTs < 400) return;
     const acc =
@@ -1150,47 +1242,67 @@
       }
     }
     if (!state.hardwareZoom) {
-      state.zoomMin = 0.5;
-      state.zoomMax = 8;
+      state.zoomMin = 1;
+      state.zoomMax = DIG_ZOOM_MAX;
       state.zoom = 1;
+    } else {
+      // Prefer not to go insane optical either
+      state.zoomMax = Math.min(state.zoomMax, 6);
     }
     if (els.zoomSlider) {
       els.zoomSlider.min = String(state.zoomMin);
       els.zoomSlider.max = String(state.zoomMax);
-      els.zoomSlider.step = "0.1";
+      els.zoomSlider.step = "0.5";
       els.zoomSlider.value = String(state.zoom);
     }
     applyZoom(state.zoom);
   }
 
-  async function applyZoom(z) {
-    z = Math.max(state.zoomMin, Math.min(state.zoomMax, Number(z) || 1));
-    state.zoom = z;
+  async function applyZoom(z, opts) {
+    const snap = !opts || opts.snap !== false;
+    let target = Math.max(state.zoomMin, Math.min(state.zoomMax, Number(z) || 1));
+    // Digital: hard cap + snap to clean stops for a stable optic feel
+    if (!state.hardwareZoom) {
+      target = Math.min(target, DIG_ZOOM_MAX);
+      if (snap) target = nearestZoomStep(target);
+    } else if (snap && opts && opts.forceStep) {
+      target = nearestZoomStep(target);
+    }
+    state.zoomTarget = target;
+    state.zoom = target;
+    // New zoom level: clear steady lock so user can re-acquire
+    state.steady = false;
+    state._steadyFrames = 0;
+
     const track = state.videoTrack;
     if (track && state.hardwareZoom) {
       try {
-        await track.applyConstraints({ advanced: [{ zoom: z }] });
-        els.camera.style.transform = "scale(1)";
+        await track.applyConstraints({ advanced: [{ zoom: target }] });
+        els.camera.style.transform = "none";
       } catch (_) {
-        els.camera.style.transform = "scale(" + Math.max(1, z) + ")";
+        els.camera.style.transform = "scale(" + Math.max(1, target) + ")";
       }
     } else {
-      els.camera.style.transform = "scale(" + Math.max(0.5, z) + ")";
+      // No CSS transition — discrete scale only (transition fought the hand)
+      els.camera.style.transition = "none";
+      els.camera.style.transform =
+        target <= 1.01 ? "none" : "scale(" + target + ")";
     }
     els.camera.style.transformOrigin = "center center";
     if (els.zoomVal) {
-      els.zoomVal.textContent =
-        Math.round(state.zoom * 10) / 10 + "×" + (state.hardwareZoom ? " · hw" : " · dig");
+      els.zoomVal.textContent = Math.round(state.zoom * 10) / 10 + "×";
     }
     if (els.zoomSlider) els.zoomSlider.value = String(state.zoom);
     els.zoomBtns?.forEach((btn) => {
       const v = Number(btn.getAttribute("data-zoom"));
-      btn.classList.toggle("active", Math.abs(v - state.zoom) < 0.15);
+      btn.classList.toggle("active", Math.abs(v - state.zoom) < 0.2);
     });
+    syncZoomChrome();
   }
 
   let pinchStartDist = null;
   let pinchStartZoom = 1;
+  let pinchLiveZoom = 1;
   function touchDist(a, b) {
     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   }
@@ -1198,14 +1310,27 @@
     if (!ev.touches || ev.touches.length < 2) return;
     pinchStartDist = touchDist(ev.touches[0], ev.touches[1]);
     pinchStartZoom = state.zoom;
+    pinchLiveZoom = state.zoom;
   }
   function onTouchMove(ev) {
     if (!ev.touches || ev.touches.length < 2 || !pinchStartDist) return;
     ev.preventDefault();
-    applyZoom(pinchStartZoom * (touchDist(ev.touches[0], ev.touches[1]) / pinchStartDist));
+    const raw = pinchStartZoom * (touchDist(ev.touches[0], ev.touches[1]) / pinchStartDist);
+    // Live preview without snap thrash; light quantize to 0.25
+    const q = Math.round(raw * 4) / 4;
+    if (Math.abs(q - pinchLiveZoom) >= 0.25) {
+      pinchLiveZoom = q;
+      applyZoom(q, { snap: false });
+    }
   }
   function onTouchEnd(ev) {
-    if (!ev.touches || ev.touches.length < 2) pinchStartDist = null;
+    if (!ev.touches || ev.touches.length < 2) {
+      if (pinchStartDist != null) {
+        // Settle to clean step when fingers lift
+        applyZoom(state.zoom, { snap: true });
+      }
+      pinchStartDist = null;
+    }
   }
 
   // ── Fixed stars / constellations ─────────────────────────────────────
@@ -1527,7 +1652,8 @@
     if (state.heading == null || state.pitch == null) return;
     computeStars();
     const cache = state.starCache || {};
-    const showNames = state.showStarNames !== false;
+    const showNames =
+      state.showStarNames !== false && (state.zoom || 1) < 1.6;
     const map = isPlanetarium();
 
     ctx.save();
@@ -2502,30 +2628,29 @@
       ctx.textAlign = "start";
     }
 
-    // Layer order matches Sky Guide-style reference:
-    // field stars → white figure art → cyan sticks → bright stars → red ecliptic → grahas
+    // Layer order: quiet the plate when zoomed so the reticle owns attention
+    const zoomQuiet = (state.zoom || 1) >= 1.6;
     if (state.overlays.stars) {
       drawFieldStars(w, h);
-      drawConstellationArt(w, h);
+      if (!zoomQuiet) drawConstellationArt(w, h);
       drawConstellations(w, h);
     }
 
-    // Red ecliptic spine
+    // Red ecliptic spine — hide when zoomed (visual noise)
     if (
-      state.overlays.stars ||
-      state.overlays.rasi ||
-      state.overlays.nakshatra ||
-      isPlanetarium()
+      !zoomQuiet &&
+      (state.overlays.stars ||
+        state.overlays.rasi ||
+        state.overlays.nakshatra ||
+        isPlanetarium())
     ) {
       drawEclipticSpine(w, h);
     }
 
-    // Optional gaṇita belts (off by default in map mode for cleaner look)
-    if (state.overlays.rasi) drawZodiacBelt(w, h);
-    if (state.overlays.nakshatra) drawNakshatraBelt(w, h);
+    if (!zoomQuiet && state.overlays.rasi) drawZodiacBelt(w, h);
+    if (!zoomQuiet && state.overlays.nakshatra) drawNakshatraBelt(w, h);
 
-    // Floating N/NE/E/SE… badges
-    drawCompassBadges(w, h);
+    if (!zoomQuiet) drawCompassBadges(w, h);
 
     let nearest = null;
 
@@ -2669,16 +2794,18 @@
         }
       }
 
-      // Floating labels only over camera; planetarium uses bottom info card
-      if (!isPlanetarium()) {
-        const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
-        const label =
-          obj.label +
-          (obj.alt < 0 ? " ↓" : "") +
-          (obj.rasi ? " · " + obj.rasi : "");
-        const line2 =
-          (badge ? badge + " · " : "") +
-          (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
+      // Labels: quiet when zoomed (noise worsens shake perception)
+      const zoomedIn = (state.zoom || 1) >= 1.6;
+      if (!isPlanetarium() && (!zoomedIn || isTarget || p.angDist < lookAtThreshold())) {
+        const label = zoomedIn
+          ? obj.label
+          : obj.label +
+            (obj.alt < 0 ? " ↓" : "") +
+            (obj.rasi ? " · " + obj.rasi : "");
+        const line2 = zoomedIn
+          ? ""
+          : ((obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge + " · " : "") +
+            (obj.mag != null ? "m" + obj.mag.toFixed(1) : ""));
         ctx.font = "700 12px -apple-system, system-ui, sans-serif";
         const tw = Math.max(
           ctx.measureText(label).width,
@@ -3979,10 +4106,18 @@
       }
       els.pitchOffsetVal.textContent = (v >= 0 ? "+" : "") + v + "°";
     });
-    els.zoomSlider?.addEventListener("input", () => applyZoom(Number(els.zoomSlider.value)));
+    els.zoomSlider?.addEventListener("input", () =>
+      applyZoom(Number(els.zoomSlider.value), { snap: false })
+    );
+    els.zoomSlider?.addEventListener("change", () =>
+      applyZoom(Number(els.zoomSlider.value), { snap: true })
+    );
     els.zoomBtns?.forEach((btn) => {
-      btn.addEventListener("click", () => applyZoom(Number(btn.getAttribute("data-zoom"))));
+      btn.addEventListener("click", () =>
+        applyZoom(Number(btn.getAttribute("data-zoom")), { snap: true })
+      );
     });
+    els.zoomChip?.addEventListener("click", () => applyZoom(1, { snap: true }));
 
     setStatus("Tap Allow & start", "muted");
   }

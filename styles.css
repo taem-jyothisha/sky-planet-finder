@@ -128,10 +128,10 @@ body.howto-open .chrome-btn {
   height: 100%;
   object-fit: cover;
   background: #000;
-  transform: scale(1);
+  transform: none;
   transform-origin: center center;
-  transition: transform 0.08s linear, opacity 0.25s ease;
-  /* Android/iOS video quirks */
+  /* No transform transition — it fought the hand and read as shake */
+  transition: opacity 0.25s ease;
   object-position: center;
 }
 
@@ -318,54 +318,119 @@ body.clean-ui .crosshair { opacity: 0.22; }
 .chip.ok { color: var(--good); border-color: rgba(109,255,168,0.35); }
 .chip.warn { color: var(--warn); }
 
-/* Optical center of AR projection = screen center */
+/* Optical center = screen center. Size fixed in CSS px (never scales with zoom). */
 .crosshair {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 58px;
-  height: 58px;
+  width: 44px;
+  height: 44px;
   z-index: 5;
   pointer-events: none;
+  opacity: 0.35;
+  transition: opacity 0.2s ease, width 0.15s ease, height 0.15s ease;
 }
 .crosshair .ring {
   position: absolute;
   inset: 0;
-  border: 1.5px solid rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.35);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+  box-shadow: none;
+  opacity: 0.55;
 }
 .crosshair .dot {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 0 8px rgba(255,255,255,0.8);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.75);
 }
 .crosshair::before,
 .crosshair::after {
   content: "";
   position: absolute;
-  background: rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.55);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
 }
 .crosshair::before {
   left: 50%;
-  top: -10px;
-  bottom: -10px;
+  top: -8px;
+  bottom: -8px;
   width: 1px;
   margin-left: -0.5px;
 }
 .crosshair::after {
   top: 50%;
-  left: -10px;
-  right: -10px;
+  left: -8px;
+  right: -8px;
   height: 1px;
   margin-top: -0.5px;
+}
+
+/* High zoom: thinner reticle, higher opacity — aim plate, not shouty ring */
+body.zoomed .crosshair {
+  width: 36px;
+  height: 36px;
+  opacity: 0.72;
+}
+body.zoomed .crosshair .ring {
+  opacity: 0.25;
+  border-width: 1px;
+}
+body.steady .crosshair {
+  opacity: 0.9;
+}
+body.steady .crosshair .dot {
+  background: #6dffa8;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.8);
+}
+
+/* Pithy zoom readout — tap to reset 1× */
+.zoom-chip {
+  position: absolute;
+  z-index: 16;
+  top: calc(0.7rem + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 1.75rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.5);
+  color: rgba(240,244,255,0.92);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: auto;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.zoom-chip.hidden { display: none; }
+body.steady .zoom-chip {
+  color: #6dffa8;
+  border-color: rgba(109,255,168,0.4);
+}
+
+/* Zoomed: cut chrome that steals the eye from the + */
+body.zoomed .brand-watermark,
+body.zoomed .edge-cue,
+body.zoomed .pointing-hud,
+body.zoomed #locChip,
+body.zoomed #statusChip {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+body.zoomed .chrome-btn {
+  opacity: 0.4;
+}
+body.zoomed.steady .chrome-btn {
+  opacity: 0.28;
 }
 
 /* Edge direction strips */
