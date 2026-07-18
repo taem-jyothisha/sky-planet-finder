@@ -1,7 +1,7 @@
 {
   "name": "Raman Sky Guide",
   "short_name": "Raman Sky",
-  "description": "Night sky guide for grahas, nakṣatras, rāśis and constellations — Raman ayanāṃśa only.",
+  "description": "Find grahas, nakṣatras, and constellations on your phone.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#000000",

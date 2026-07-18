@@ -1,64 +1,25 @@
 # Raman Sky Guide
 
-Point your phone at the night sky. Identify **grahas**, **nakṣatras**, **rāśis**, and constellations.
+Point your phone at the sky. Find grahas, nakṣatras, rāśis, and constellations.
 
-**Ayanāṃśa: Raman only** (Swiss Ephemeris `SIDM_RAMAN`). Other ayanāṃśas are not used.
+Uses **Raman** ayanāṃśa only.
 
 ## Live
 
-**https://taem-jyothisha.github.io/sky-planet-finder/?v=16**
+https://taem-jyothisha.github.io/sky-planet-finder/?v=18
 
-Open in **Safari** (iPhone) → **Allow & start** → optional: Share → **Add to Home Screen**.
+Open in Safari. Allow camera, location, and motion. Optional: Add to Home Screen.
 
-Repo: https://github.com/taem-jyothisha/sky-planet-finder
+## Controls
 
-## How it feels
-
-1. **Clean fullscreen** sky after start (no clutter).
-2. Tap **☰** (top left) → layers, zoom, align, compass trim.
-3. Tap **⌕** (top right) → find grahas / constellations / ISS.
-4. Tap a target → guide + bottom info card.
-5. **Planetarium** mode = black sky map; turn it off for camera AR.
-
-## Features
-
-- Planetarium map with constellation figure art + cyan sticks  
-- All 9 grahas (Raman rāśi / nakṣatra / pāda)  
-- Zodiac & nakṣatra belts (optional layers)  
-- Large planet markers (Jupiter, Saturn, Moon, …)  
-- ISS live position  
-- Align on Moon/Venus when compass drifts  
-
-## iPhone setup
-
-1. Open the **https** link in **Safari**.
-2. Tap **Allow & start** → Camera, Location, Motion.
-3. Optional: **Add to Home Screen** for fullscreen.
-4. Outdoors, pan slowly. Use **Align** once if labels drift.
-
-**Settings → Safari** (or the home-screen app) → enable Camera, Location, Motion & Orientation. Prefer **Precise Location**.
-
-## How it works
-
-| Piece | Source |
-|--------|--------|
-| Planet / star positions | [astronomy-engine](https://github.com/cosinekitty/astronomy) |
-| Aim | Device orientation (compass + pitch) |
-| Sidereal measure | Raman ayanāṃśa only (`astro-extras.js`) |
-| Overlays | Canvas on camera or black planetarium |
-
-Accuracy is for **recognition and learning**, not a survey instrument. Compass error is the usual limit on phones.
+- **☰** menu (layers, zoom, align, trim)
+- **⌕** find a target
+- **◎** recalibrate sensors
 
 ## Files
 
-- `index.html` — shell, gate, drawers  
-- `styles.css` — clean fullscreen UI  
-- `app.js` — sensors, projection, draw loop  
-- `astro-extras.js` — Raman, grahas, belts  
-- `stars-constellations.js` — stick figures  
-- `constellation-art.js` — white figure art  
-- `manifest.json` — PWA “Raman Sky Guide”  
-
-## License / sharing
-
-Built for public sharing by the Raman Sky Guide project. Keep Raman-only ayanāṃśa if you fork.
+- `index.html` shell
+- `app.js` sensors and drawing
+- `astro-extras.js` Raman math and grahas
+- `stars-constellations.js` stick figures
+- `constellation-art.js` figure outlines

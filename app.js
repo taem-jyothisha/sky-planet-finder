@@ -22,8 +22,6 @@
     btnCalibrate: $("btnCalibrate"),
     btnRecalibrate: $("btnRecalibrate"),
     btnRecalibrateMenu: $("btnRecalibrateMenu"),
-    btnIntroContinue: $("btnIntroContinue"),
-    introOverlay: $("introOverlay"),
     btnLayers: $("btnLayers"),
     btnFind: $("btnFind"),
     btnCloseLayers: $("btnCloseLayers"),
@@ -536,14 +534,11 @@
       if (!state.running) return;
       const moved = performance.now() - (state.lastAimMoveTs || 0) < 3000;
       if ((state.orientEventCount || 0) < 2 && (state.motionEventCount || 0) < 2) {
-        setStatus(
-          "No sensors — Settings → Safari → Motion & Orientation ON, then ◎",
-          "warn"
-        );
+        setStatus("No sensors. Turn on Motion in Safari Settings, then tap ◎", "warn");
       } else if (!moved && !state.orientReady) {
-        setStatus("Sensors idle — wave phone in a figure‑8", "warn");
+        setStatus("Wave the phone in a figure-8", "warn");
       } else if (state.orientReady) {
-        setStatus("Sensors live · " + (state.orientSource || ""), "ok");
+        setStatus("Sensors live", "ok");
       }
     }, 2800);
   }
@@ -559,7 +554,7 @@
       btn.classList.add("spinning");
       btn.classList.remove("flash-ok");
     }
-    setStatus("Recalibrating compass · gyro · GPS…", "warn");
+    setStatus("Recalibrating…", "warn");
 
     // Reset fusion state so a stale north bias cannot stick
     state.northBias = 0;
@@ -593,10 +588,7 @@
       // Re-request sensors inside this tap (iOS)
       await beginSensorPermissionsInGesture();
     } catch (err) {
-      setStatus(
-        "Motion permission needed — Settings → Safari → Motion & Orientation",
-        "warn"
-      );
+      setStatus("Allow Motion in Safari Settings", "warn");
     }
 
     // Ensure listeners are running
@@ -621,24 +613,13 @@
     state.starCacheAt = 0;
     state.fieldCacheAt = 0;
 
-    setStatus("Wave phone in a figure‑8 · then Align on Candra (Moon)", "ok");
+    setStatus("Wave phone in a figure-8, then Align on the Moon", "ok");
     els.alignBanner?.classList.remove("hidden");
     if (btn) {
       btn.classList.remove("spinning");
       btn.classList.add("flash-ok");
       setTimeout(() => btn.classList.remove("flash-ok"), 1600);
     }
-  }
-
-  function showIntroOverlay() {
-    if (!els.introOverlay) return;
-    els.introOverlay.classList.remove("hidden");
-    document.body.classList.add("intro-open");
-  }
-
-  function hideIntroOverlay() {
-    els.introOverlay?.classList.add("hidden");
-    document.body.classList.remove("intro-open");
   }
 
   /**
@@ -1467,29 +1448,23 @@
     return map ? 11 : 8;
   }
 
-  /** Sky Map–style blurbs for info card */
   const OBJECT_BLURB = {
-    "graha:Sun": "The Sun is the star at the center of our solar system — the source of light and heat for Earth.",
-    "graha:Moon": "The ocean tides on Earth are mostly due to the Moon's gravitational pull.",
-    "graha:Mars": "Mars is the red planet — smaller than Earth, with polar ice and the tallest volcano in the solar system.",
-    "graha:Mercury": "Mercury is the closest planet to the Sun and the fastest in its orbit.",
-    "graha:Jupiter": "Largest planet in the solar system — a gas giant with cloud belts and the Great Red Spot.",
-    "graha:Venus": "Venus is the brightest planet in the sky — Earth's twin in size, wrapped in thick clouds.",
-    "graha:Saturn": "Saturn is famous for its rings — a gas giant that sits far beyond Jupiter.",
-    "graha:Rahu": "Rāhu is the ascending lunar node — not a light, but a shadow point used in jyotiṣa.",
-    "graha:Ketu": "Ketu is the descending lunar node — the southern shadow point opposite Rāhu.",
-    iss: "Operated by expedition crews of astronauts and cosmonauts — the largest artificial body in orbit.",
-    "const:scorpius":
-      "Scorpius is a large constellation near the center of the Milky Way — look for the hook and red Antares (Jyeṣṭhā).",
-    "const:libra":
-      "Libra is the scales of justice — a zodiac constellation between Virgo and Scorpius.",
-    "const:virgo":
-      "Virgo is the maiden — Spica (Citrā) is its brightest star, a key yoga-tārā.",
-    "const:orion":
-      "Orion the hunter is one of the easiest patterns to learn — three belt stars in a row.",
-    "const:leo": "Leo the lion — the sickle and Regulus (Maghā) mark its head and heart.",
-    "const:ursa_major":
-      "Ursa Major holds the Big Dipper — its pointer stars lead the eye to Polaris.",
+    "graha:Sun": "The Sun. Daytime body.",
+    "graha:Moon": "The Moon. Best object to Align on.",
+    "graha:Mars": "Mars. Reddish when bright.",
+    "graha:Mercury": "Mercury. Low near the Sun. Hard to catch.",
+    "graha:Jupiter": "Jupiter. Bright. Bands if you look carefully.",
+    "graha:Venus": "Venus. Brightest planet. Good Align target.",
+    "graha:Saturn": "Saturn. Steady pale light. Rings need a telescope.",
+    "graha:Rahu": "Rāhu. North lunar node. Not a light.",
+    "graha:Ketu": "Ketu. South lunar node. Not a light.",
+    iss: "International Space Station. Moves fast across the sky.",
+    "const:scorpius": "Scorpius. Hook shape. Red Antares is Jyeṣṭhā.",
+    "const:libra": "Libra. The scales. Between Virgo and Scorpius.",
+    "const:virgo": "Virgo. Spica is Citrā.",
+    "const:orion": "Orion. Three belt stars in a row.",
+    "const:leo": "Leo. Sickle head. Regulus is Maghā.",
+    "const:ursa_major": "Ursa Major. Big Dipper points toward Polaris.",
   };
 
   const OBJECT_EN = {
@@ -1529,7 +1504,7 @@
       OBJECT_BLURB[obj.id] ||
       obj.detail ||
       obj.sub ||
-      "Tap Align if the marker does not match the real sky.";
+      "If the marker is off, Align on the Moon.";
     return { title: en, sub, body };
   }
 
@@ -1775,9 +1750,7 @@
           detail:
             (moonExtra
               ? moonExtra.shape + " · " + moonExtra.paksha + " pakṣa · "
-              : "") +
-            role.note +
-            " · Raman",
+              : "") + role.note,
           color: g.color,
           az,
           alt,
@@ -2636,27 +2609,27 @@
   const LAYER_COPY = {
     map: {
       title: "Planetarium",
-      hint: "Black sky map · like Sky Guide (not camera AR)",
+      hint: "Black sky map",
     },
     graha: {
-      title: "Graha · all 9",
-      hint: "Sūrya…Ketu · Raman · always all 9 in list",
+      title: "Graha",
+      hint: "All nine. Tap one to guide.",
     },
     nakshatra: {
-      title: "Nakṣatra belt",
-      hint: "27 mansions · camera band overlay",
+      title: "Nakṣatra",
+      hint: "27 mansions on the ecliptic",
     },
     rasi: {
-      title: "Zodiac belt",
-      hint: "12 rāśis · ecliptic band · Raman",
+      title: "Zodiac",
+      hint: "12 rāśis on the ecliptic",
     },
     stars: {
       title: "Constellations",
-      hint: "White figure art · cyan sticks · field stars",
+      hint: "Figures and bright stars",
     },
     iss: {
       title: "ISS",
-      hint: "International Space Station · live",
+      hint: "Live position",
     },
   };
 
@@ -2688,8 +2661,8 @@
             id: "const:" + c.id,
             kind: "stars",
             label: c.label,
-            sub: c.hint + " · below horizon now",
-            detail: "Pan the sky · Align if labels drift",
+            sub: c.hint + " · below horizon",
+            detail: "Pan until it rises. Align if labels drift.",
             color: "#a8c0ff",
             az: 0,
             alt: -90,
@@ -2703,7 +2676,7 @@
           sub: c.hint,
           detail:
             OBJECT_BLURB["const:" + c.id] ||
-            "White figure art + cyan sticks — landmark for the eye, not a Raman rāśi.",
+            "Sky pattern. Not a rāśi boundary.",
           color: "#a8c0ff",
           az: az / n,
           alt: alt / n,
@@ -2761,7 +2734,7 @@
     if (els.listTitle) els.listTitle.textContent = copy.title;
     if (els.layerHint) {
       if (state.activeLayer === "graha") {
-        els.layerHint.textContent = "All 9 grahas · Raman · tap to guide";
+        els.layerHint.textContent = "All nine. Tap to guide.";
       } else {
         els.layerHint.textContent = copy.hint;
       }
@@ -3080,7 +3053,7 @@
       );
     }
     if (!body || state.headingRaw == null || state.pitchRaw == null) {
-      setStatus("Select Moon/Venus, put the real one in the crosshair, tap Align", "warn");
+      setStatus("Pick the Moon or Venus, center it, then Align", "warn");
       if (els.alignBanner) {
         els.alignBanner.classList.remove("hidden");
       }
@@ -3123,7 +3096,7 @@
       els.pitchOffsetVal.textContent =
         (state.pitchOffset >= 0 ? "+" : "") + state.pitchOffset.toFixed(0) + "°";
     }
-    setStatus("Aligned on " + body.label + " · overlays should match now", "ok");
+    setStatus("Aligned on " + body.label, "ok");
     els.alignBanner?.classList.add("hidden");
   }
 
@@ -3234,13 +3207,8 @@
       document.body.classList.add("running", "clean-ui");
       closeAllDrawers();
 
-      // Teaching overlay on navagrahas / nakṣatras, then clean sky
-      showIntroOverlay();
-
       setStatus(
-        notes.length
-          ? "Live (partial) · " + notes.join(" · ") + " · pan phone"
-          : "Live · read intro · then pan · ◎ to recalibrate",
+        notes.length ? "Live with limits: " + notes.join(", ") : "Live. Pan the sky.",
         notes.length ? "warn" : "ok"
       );
       syncGuidingUi();
@@ -3250,8 +3218,7 @@
       const msg = err && err.message ? err.message : String(err);
       if (els.gate) els.gate.classList.remove("hidden");
       showGateError(
-        msg +
-          "\n\nSafari · Camera/Location/Motion Allow · Precise Location On · reload."
+        msg + "\n\nIn Safari, allow Camera, Location, and Motion. Turn Precise Location on. Reload."
       );
       setStatus("Start failed", "warn");
       state.running = false;
@@ -3327,11 +3294,6 @@
       onRecal(e);
       setLayersOpen(false);
     });
-    els.btnIntroContinue?.addEventListener("click", () => {
-      hideIntroOverlay();
-      setStatus("Pan the sky · ☰ layers · ⌕ find · ◎ recalibrate", "ok");
-    });
-
     els.btnLayers?.addEventListener("click", () => setLayersOpen(!state.layersOpen));
     els.btnCloseLayers?.addEventListener("click", () => setLayersOpen(false));
     els.btnFind?.addEventListener("click", () => setFindOpen(!state.findOpen));
@@ -3369,8 +3331,7 @@
       if (!state.layersOpen && !state.findOpen) return;
       const t = ev.target;
       if (!t || !t.closest) return;
-      if (t.closest(".map-panel, .find-panel, .chrome-btn, .info-card, .gate, .intro-overlay"))
-        return;
+      if (t.closest(".map-panel, .find-panel, .chrome-btn, .info-card, .gate")) return;
       closeAllDrawers();
     });
 
@@ -3404,7 +3365,7 @@
       btn.addEventListener("click", () => applyZoom(Number(btn.getAttribute("data-zoom"))));
     });
 
-    setStatus("Raman Sky Guide · Allow & start", "muted");
+    setStatus("Tap Allow & start", "muted");
   }
 
   if (document.readyState === "loading") {

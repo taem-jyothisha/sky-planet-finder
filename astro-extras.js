@@ -123,7 +123,7 @@
         code: "node",
         nakedEye: false,
         badge: "Chāyā",
-        note: "Mathematical node · not a light in the sky · aim by belt + Align",
+        note: "Node. Not a light. Use Align if needed.",
       };
     }
     if (g.body === "Sun" || g.id === "Sun") {
@@ -131,7 +131,7 @@
         code: "day",
         nakedEye: false,
         badge: "Sūrya",
-        note: "Daytime body · not for night recognition",
+        note: "Daytime body.",
       };
     }
     if (alt < -2) {
@@ -139,7 +139,7 @@
         code: "set",
         nakedEye: false,
         badge: "Set",
-        note: "Below horizon now · note rise az for later",
+        note: "Below horizon.",
       };
     }
     if (alt >= -2 && alt < 8) {
@@ -147,7 +147,7 @@
         code: "horizon",
         nakedEye: mag != null ? mag <= 2.5 : true,
         badge: "Rise/Set",
-        note: "Near horizon · atmosphere · best after Align",
+        note: "Near horizon. Align helps.",
       };
     }
     // Naked-eye planets roughly mag ≤ ~6; practical bright cut ~2.5 for cities
@@ -156,7 +156,7 @@
         code: "bright",
         nakedEye: true,
         badge: "Bright",
-        note: "Strong naked-eye candidate · match color + ecliptic",
+        note: "Bright. Good naked-eye target.",
       };
     }
     if (mag != null && mag <= 4.5) {
@@ -172,14 +172,14 @@
         code: "faint",
         nakedEye: false,
         badge: "Faint",
-        note: "Hard naked-eye · binoculars / trust AR after Align",
+        note: "Faint. Align if needed.",
       };
     }
     return {
       code: "ok",
       nakedEye: alt > 10,
       badge: "Up",
-      note: "Above horizon · confirm with belt + Align",
+      note: "Above horizon.",
     };
   }
 
