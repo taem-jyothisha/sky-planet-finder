@@ -95,17 +95,20 @@
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
-    /** Which overlays are drawn on camera (multi-select, Maps-style) */
+    /** Which overlays are drawn (multi-select, Maps-style) */
     overlays: {
+      map: true, // planetarium black sky (reference look) vs camera AR
       graha: true,
-      rasi: true,
-      nakshatra: true,
-      stars: true, // constellation stick figures + bright stars
+      rasi: false, // off by default — reference is red ecliptic only
+      nakshatra: false,
+      stars: true, // figure art + cyan sticks + field stars
       iss: false,
     },
     showStarNames: true,
     starCache: {}, // name -> {az, alt, mag, name, nak}
     starCacheAt: 0,
+    fieldCache: [], // background field stars {az,alt,mag}
+    fieldCacheAt: 0,
     /** Which list Find opens (last focused layer) */
     activeLayer: "graha",
     onlyAbove: false,
@@ -779,6 +782,17 @@
     return window.SkyStars;
   }
 
+  function Art() {
+    return window.SkyArt;
+  }
+
+  /** Horizon from J2000 RA hours / Dec deg (DefineStar slot) */
+  function raDecToHorizon(ra, dec, time, observer) {
+    Astronomy.DefineStar(Astronomy.Body.Star1, ra, dec, 100);
+    const equ = Astronomy.Equator(Astronomy.Body.Star1, time, observer, true, true);
+    return Astronomy.Horizon(time, observer, equ.ra, equ.dec, "normal");
+  }
+
   /** Recompute star alt/az every ~2s (stars move slowly with sky) */
   function computeStars() {
     if (state.lat == null || typeof Astronomy === "undefined" || !S()) return;
@@ -790,25 +804,10 @@
     const cache = {};
     const stars = S().STARS;
 
-    // Reuse Star1 slot for each star (astronomy-engine allows DefineStar)
     for (const key of Object.keys(stars)) {
       const s = stars[key];
       try {
-        Astronomy.DefineStar(Astronomy.Body.Star1, s.ra, s.dec, 100);
-        const equ = Astronomy.Equator(
-          Astronomy.Body.Star1,
-          time,
-          observer,
-          true,
-          true
-        );
-        const hor = Astronomy.Horizon(
-          time,
-          observer,
-          equ.ra,
-          equ.dec,
-          "normal"
-        );
+        const hor = raDecToHorizon(s.ra, s.dec, time, observer);
         cache[key] = {
           id: "star:" + key,
           kind: "star",
@@ -828,10 +827,163 @@
     state.starCacheAt = now;
   }
 
+  /** Dense background field for planetarium (like reference black sky) */
+  function computeFieldStars() {
+    if (state.lat == null || typeof Astronomy === "undefined" || !Art()) return;
+    const now = performance.now();
+    if (state.fieldCacheAt && now - state.fieldCacheAt < 3000) return;
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+    const out = [];
+    for (const s of Art().FIELD) {
+      try {
+        const hor = raDecToHorizon(s.ra, s.dec, time, observer);
+        if (hor.altitude < -8) continue;
+        out.push({ az: hor.azimuth, alt: hor.altitude, mag: s.mag });
+      } catch (_) {}
+    }
+    state.fieldCache = out;
+    state.fieldCacheAt = now;
+  }
+
+  function applyCameraVisibility() {
+    if (!els.camera) return;
+    // Planetarium map = pure black sky (reference). AR = live camera.
+    els.camera.style.opacity = state.overlays.map ? "0" : "1";
+    document.body.classList.toggle("planetarium", !!state.overlays.map);
+  }
+
   /**
-   * Draw constellation stick figures + bright star dots.
-   * Style target: Sky Guide / reference — cyan lines, glowing white dots.
-   * These are LANDMARKS for the eye — not Raman rāśi boundaries.
+   * Planetarium backdrop: solid night + milky dust + field stars.
+   */
+  function drawPlanetariumSky(w, h) {
+    ctx.save();
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, w, h);
+    // Subtle vignette / sky dust (not pure flat void)
+    const g = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.05, w * 0.5, h * 0.5, h * 0.75);
+    g.addColorStop(0, "rgba(20, 28, 48, 0.35)");
+    g.addColorStop(0.55, "rgba(8, 12, 22, 0.15)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // Very faint milky-way band suggestion
+    ctx.save();
+    ctx.translate(w * 0.55, h * 0.4);
+    ctx.rotate(-0.55);
+    const mw = ctx.createLinearGradient(0, -h * 0.15, 0, h * 0.15);
+    mw.addColorStop(0, "rgba(90, 110, 160, 0)");
+    mw.addColorStop(0.5, "rgba(120, 140, 190, 0.06)");
+    mw.addColorStop(1, "rgba(90, 110, 160, 0)");
+    ctx.fillStyle = mw;
+    ctx.fillRect(-w, -h * 0.2, w * 2, h * 0.4);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawFieldStars(w, h) {
+    if (!state.overlays.stars) return;
+    if (state.heading == null || state.pitch == null) return;
+    computeFieldStars();
+    ctx.save();
+    for (const s of state.fieldCache || []) {
+      const p = project(s);
+      if (!p || !p.inFov) continue;
+      const r = s.mag <= 4 ? 1.35 : s.mag <= 4.8 ? 1.0 : 0.7;
+      const a = s.mag <= 4 ? 0.85 : s.mag <= 5 ? 0.55 : 0.32;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(230, 235, 255, " + a + ")";
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * White constellation figure art (Scorpius scorpion etc.) in RA/Dec.
+   * This is the big visual difference vs plain stick figures.
+   */
+  function drawConstellationArt(w, h) {
+    if (!state.overlays.stars || !Art() || typeof Astronomy === "undefined") return;
+    if (state.heading == null || state.pitch == null || state.lat == null) return;
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    for (const fig of Art().FIGURES) {
+      let anyIn = false;
+      const projectedPaths = [];
+      for (const path of fig.paths) {
+        const pts = [];
+        for (const [ra, dec] of path) {
+          try {
+            const hor = raDecToHorizon(ra, dec, time, observer);
+            if (hor.altitude < -12) {
+              pts.push(null);
+              continue;
+            }
+            const p = project({ az: hor.azimuth, alt: hor.altitude });
+            if (!p) {
+              pts.push(null);
+              continue;
+            }
+            if (p.inFov || p.angDist < 45) {
+              pts.push(p);
+              if (p.inFov) anyIn = true;
+            } else pts.push(null);
+          } catch (_) {
+            pts.push(null);
+          }
+        }
+        projectedPaths.push(pts);
+      }
+      if (!anyIn) continue;
+
+      const strokeA = state.overlays.map ? 0.92 : 0.7;
+      for (const pts of projectedPaths) {
+        // Draw continuous segments (break on null)
+        let started = false;
+        ctx.beginPath();
+        for (const p of pts) {
+          if (!p) {
+            started = false;
+            continue;
+          }
+          if (!started) {
+            ctx.moveTo(p.x, p.y);
+            started = true;
+          } else ctx.lineTo(p.x, p.y);
+        }
+        // Soft white glow underlay
+        ctx.strokeStyle = "rgba(255, 255, 255, " + strokeA * 0.22 + ")";
+        ctx.lineWidth = state.overlays.map ? 4.5 : 3.2;
+        ctx.stroke();
+        // Crisp white figure line
+        started = false;
+        ctx.beginPath();
+        for (const p of pts) {
+          if (!p) {
+            started = false;
+            continue;
+          }
+          if (!started) {
+            ctx.moveTo(p.x, p.y);
+            started = true;
+          } else ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = "rgba(255, 255, 255, " + strokeA + ")";
+        ctx.lineWidth = state.overlays.map ? 1.55 : 1.25;
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Cyan stick figures + bright named star dots (over white art).
    */
   function drawConstellations(w, h) {
     if (!state.overlays.stars || !S()) return;
@@ -839,8 +991,8 @@
     computeStars();
     const cache = state.starCache || {};
     const showNames = state.showStarNames !== false;
+    const map = !!state.overlays.map;
 
-    // Lines first (under dots) — cyan glow like reference
     ctx.save();
     for (const c of S().CONSTELLATIONS) {
       let anyIn = false;
@@ -853,39 +1005,36 @@
         const pa = project(sa);
         const pb = project(sb);
         if (!pa || !pb) continue;
-        // draw if either end in/near FOV
         if (!pa.inFov && !pb.inFov && pa.angDist > 40 && pb.angDist > 40) continue;
         segs.push([pa, pb]);
         if (pa.inFov || pb.inFov) anyIn = true;
       }
       if (!segs.length) continue;
 
-      // Soft outer glow, then crisp cyan stroke
-      const lineAlpha = anyIn ? 0.85 : 0.35;
+      const lineAlpha = anyIn ? (map ? 0.95 : 0.8) : 0.3;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       for (const [pa, pb] of segs) {
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
         ctx.lineTo(pb.x, pb.y);
-        ctx.strokeStyle = "rgba(80, 170, 255, " + (lineAlpha * 0.35) + ")";
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = "rgba(70, 160, 255, " + lineAlpha * 0.4 + ")";
+        ctx.lineWidth = map ? 6 : 4;
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
         ctx.lineTo(pb.x, pb.y);
-        ctx.strokeStyle = "rgba(90, 185, 255, " + lineAlpha + ")";
-        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = "rgba(70, 175, 255, " + lineAlpha + ")";
+        ctx.lineWidth = map ? 2.2 : 1.7;
         ctx.stroke();
       }
 
-      // Constellation name at centroid of in-FOV points
       const pts = [];
       for (const [pa, pb] of segs) {
         if (pa.inFov) pts.push(pa);
         if (pb.inFov) pts.push(pb);
       }
-      if (pts.length >= 2) {
+      if (pts.length >= 2 && map) {
         let sx = 0;
         let sy = 0;
         for (const p of pts) {
@@ -893,66 +1042,67 @@
           sy += p.y;
         }
         const cx = sx / pts.length;
-        const cy = sy / pts.length;
+        const cy = sy / pts.length - 18;
         const lab = c.label;
-        ctx.font = "700 13px -apple-system, system-ui, sans-serif";
+        ctx.font = "600 12px -apple-system, system-ui, sans-serif";
         const tw = ctx.measureText(lab).width;
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        roundRect(ctx, cx - tw / 2 - 6, cy - 22, tw + 12, 18, 6);
-        ctx.fill();
-        ctx.fillStyle = "rgba(160, 220, 255, 0.98)";
-        ctx.fillText(lab, cx - tw / 2, cy - 9);
-        if (c.hint && pts.length >= 3) {
-          ctx.font = "600 9px -apple-system, system-ui, sans-serif";
-          const hw = ctx.measureText(c.hint).width;
-          ctx.fillStyle = "rgba(140, 190, 240, 0.8)";
-          ctx.fillText(c.hint, cx - hw / 2, cy - 24);
-        }
+        ctx.fillStyle = "rgba(180, 210, 255, 0.55)";
+        ctx.fillText(lab, cx - tw / 2, cy);
       }
     }
 
-    // Star dots — bright white cores with soft bloom (reference style)
+    // Bright catalog stars — glowing white
     for (const key of Object.keys(cache)) {
       const s = cache[key];
       if (s.alt < -3) continue;
       const p = project(s);
       if (!p || (!p.inFov && p.angDist > 35)) continue;
 
-      const r =
-        s.mag <= 0 ? 4.8 : s.mag <= 1 ? 3.8 : s.mag <= 2 ? 2.8 : s.mag <= 3 ? 2.1 : 1.5;
+      const r = map
+        ? s.mag <= 0
+          ? 5.5
+          : s.mag <= 1
+            ? 4.4
+            : s.mag <= 2
+              ? 3.2
+              : s.mag <= 3
+                ? 2.4
+                : 1.7
+        : s.mag <= 0
+          ? 4.5
+          : s.mag <= 1
+            ? 3.5
+            : s.mag <= 2
+              ? 2.6
+              : s.mag <= 3
+                ? 2
+                : 1.4;
 
-      // Bloom
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
-      g.addColorStop(0, "rgba(255,255,255,0.55)");
-      g.addColorStop(0.35, "rgba(200,230,255,0.22)");
-      g.addColorStop(1, "rgba(120,180,255,0)");
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.5);
+      g.addColorStop(0, "rgba(255,255,255,0.75)");
+      g.addColorStop(0.3, "rgba(210,230,255,0.28)");
+      g.addColorStop(1, "rgba(100,160,255,0)");
       ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 3.2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, r * 3.5, 0, Math.PI * 2);
       ctx.fillStyle = g;
       ctx.fill();
-      // Core
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
-      ctx.fill();
-      // Tiny cool rim
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 0.55, 0, Math.PI * 2);
-      ctx.fillStyle = s.mag <= 1.2 ? "#ffffff" : "rgba(220, 235, 255, 0.95)";
       ctx.fill();
 
       const showThisName =
         showNames &&
         p.inFov &&
-        (s.mag <= 1.6 || s.nak || key === "Polaris" || key === "Sirius" || key === "Antares");
+        (s.mag <= 1.4 || s.nak || key === "Polaris" || key === "Sirius" || key === "Antares");
       if (showThisName) {
         const text = s.nak ? s.label + " · " + s.nak : s.label;
         ctx.font = "600 10px -apple-system, system-ui, sans-serif";
         const tw = ctx.measureText(text).width;
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
         roundRect(ctx, p.x + r + 3, p.y - 7, tw + 6, 14, 4);
         ctx.fill();
-        ctx.fillStyle = "rgba(230, 240, 255, 0.95)";
+        ctx.fillStyle = "rgba(235, 240, 255, 0.95)";
         ctx.fillText(text, p.x + r + 6, p.y + 3);
       }
     }
@@ -1069,63 +1219,129 @@
     ctx.textBaseline = "alphabetic";
   }
 
-  /** Saturn (Śani): disc + tilted ring ellipse — reference planet look */
+  /**
+   * Saturn (Śani) — large ringed globe like the reference screenshot.
+   * Map mode uses exaggerated size (Sky Guide style, not true angular size).
+   */
   function drawSaturnMarker(px, py, r, color, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha;
-    // Outer glow
+    const tilt = -0.42;
+    const ringRx = r * 2.15;
+    const ringRy = r * 0.55;
+
+    // Soft planetary glow
+    const glow = ctx.createRadialGradient(px, py, r * 0.2, px, py, r * 2.8);
+    glow.addColorStop(0, "rgba(255, 230, 170, 0.2)");
+    glow.addColorStop(0.5, "rgba(180, 150, 80, 0.08)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.beginPath();
-    ctx.arc(px, py, r + 10, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(232, 208, 144, 0.22)";
+    ctx.arc(px, py, r * 2.8, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
     ctx.fill();
-    // Rings (behind / through body)
+
+    // Far half of rings (behind globe)
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(-0.35);
-    ctx.scale(1, 0.32);
-    for (const [rr, lw, col] of [
-      [r + 14, 3.2, "rgba(210, 190, 140, 0.55)"],
-      [r + 11, 2.4, "rgba(245, 225, 170, 0.9)"],
-      [r + 8, 1.6, "rgba(180, 160, 110, 0.75)"],
-    ]) {
-      ctx.beginPath();
-      ctx.arc(0, 0, rr, 0, Math.PI * 2);
-      ctx.strokeStyle = col;
-      ctx.lineWidth = lw;
-      ctx.stroke();
-    }
+    ctx.rotate(tilt);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx, ringRy, 0, Math.PI, Math.PI * 2);
+    ctx.strokeStyle = "rgba(200, 180, 130, 0.55)";
+    ctx.lineWidth = r * 0.22;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx * 0.82, ringRy * 0.82, 0, Math.PI, Math.PI * 2);
+    ctx.strokeStyle = "rgba(160, 140, 95, 0.65)";
+    ctx.lineWidth = r * 0.12;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx * 1.08, ringRy * 1.08, 0, Math.PI, Math.PI * 2);
+    ctx.strokeStyle = "rgba(230, 210, 160, 0.4)";
+    ctx.lineWidth = r * 0.08;
+    ctx.stroke();
     ctx.restore();
-    // Body
-    const g = ctx.createRadialGradient(px - r * 0.3, py - r * 0.35, r * 0.1, px, py, r);
-    g.addColorStop(0, "#f5e6b8");
-    g.addColorStop(0.55, color || "#e8d090");
-    g.addColorStop(1, "#a89050");
+
+    // Globe with bands
+    const g = ctx.createRadialGradient(
+      px - r * 0.35,
+      py - r * 0.4,
+      r * 0.08,
+      px,
+      py,
+      r
+    );
+    g.addColorStop(0, "#fff2c8");
+    g.addColorStop(0.25, "#f0d090");
+    g.addColorStop(0.55, color || "#d4b06a");
+    g.addColorStop(0.85, "#a88840");
+    g.addColorStop(1, "#6a5428");
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fillStyle = g;
     ctx.fill();
-    // Equatorial band
-    ctx.beginPath();
-    ctx.ellipse(px, py + r * 0.1, r * 0.85, r * 0.18, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(160, 130, 70, 0.25)";
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "rgba(255,255,255,0.75)";
+    // atmospheric bands
+    for (const [oy, rh, a] of [
+      [-0.25, 0.14, 0.12],
+      [0.05, 0.2, 0.18],
+      [0.28, 0.12, 0.14],
+    ]) {
+      ctx.beginPath();
+      ctx.ellipse(px, py + r * oy, r * 0.92, r * rh, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(120, 90, 40, " + a + ")";
+      ctx.fill();
+    }
+    // terminator soft edge
+    const term = ctx.createLinearGradient(px - r, py, px + r, py);
+    term.addColorStop(0, "rgba(0,0,0,0.25)");
+    term.addColorStop(0.45, "rgba(0,0,0,0)");
+    term.addColorStop(1, "rgba(40, 30, 10, 0.15)");
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.stroke();
-    // Near-side ring arc over body
+    ctx.fillStyle = term;
+    ctx.fill();
+
+    // Near half of rings (in front of globe)
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(-0.35);
-    ctx.scale(1, 0.32);
+    ctx.rotate(tilt);
     ctx.beginPath();
-    ctx.arc(0, 0, r + 11, 0.15, Math.PI - 0.15);
-    ctx.strokeStyle = "rgba(245, 225, 170, 0.95)";
-    ctx.lineWidth = 2.2;
+    ctx.ellipse(0, 0, ringRx, ringRy, 0, 0, Math.PI);
+    ctx.strokeStyle = "rgba(245, 225, 175, 0.95)";
+    ctx.lineWidth = r * 0.24;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx * 0.82, ringRy * 0.82, 0, 0, Math.PI);
+    ctx.strokeStyle = "rgba(170, 145, 95, 0.85)";
+    ctx.lineWidth = r * 0.14;
+    ctx.stroke();
+    // Cassini-ish dark gap
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx * 0.93, ringRy * 0.93, 0, 0, Math.PI);
+    ctx.strokeStyle = "rgba(40, 30, 15, 0.55)";
+    ctx.lineWidth = r * 0.05;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ringRx * 1.08, ringRy * 1.08, 0, 0, Math.PI);
+    ctx.strokeStyle = "rgba(255, 240, 200, 0.55)";
+    ctx.lineWidth = r * 0.09;
     ctx.stroke();
     ctx.restore();
     ctx.restore();
+  }
+
+  /** Exaggerated planet radius for map mode (reference look) */
+  function grahaDrawRadius(obj) {
+    const map = !!state.overlays.map;
+    const z = Math.max(0.6, Math.min(state.zoom || 1, 4));
+    if (obj.label === "Sūrya") return map ? 22 * Math.sqrt(z) : 16;
+    if (obj.label === "Candra") return map ? 18 * Math.sqrt(z) : 14;
+    if (obj.label === "Śani" || obj.id === "graha:Saturn")
+      return map ? 34 * Math.sqrt(z) : 14;
+    if (obj.label === "Guru" || obj.id === "graha:Jupiter")
+      return map ? 20 * Math.sqrt(z) : 11;
+    if (obj.kind === "iss") return 11;
+    if (obj.mag != null && obj.mag < 0) return map ? 14 : 11;
+    return map ? 10 : 8;
   }
 
   // ── Sky catalog ──────────────────────────────────────────────────────
@@ -1434,9 +1650,14 @@
     const { w, h } = cssSize();
     ctx.clearRect(0, 0, w, h);
 
+    // Planetarium map = black sky (reference). AR = transparent over camera.
+    if (state.overlays.map) {
+      drawPlanetariumSky(w, h);
+    }
+
     // Sensor dead → tell user overlays cannot track
     if (!state.orientReady) {
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
       ctx.fillRect(w * 0.1, h * 0.42, w * 0.8, 48);
       ctx.fillStyle = "#ffd27a";
       ctx.font = "700 14px -apple-system, system-ui, sans-serif";
@@ -1445,19 +1666,24 @@
       ctx.textAlign = "start";
     }
 
-    // ── Fixed stars & stick figures first (landmarks for the eye) ──
-    if (state.overlays.stars) drawConstellations(w, h);
+    // Layer order matches Sky Guide-style reference:
+    // field stars → white figure art → cyan sticks → bright stars → red ecliptic → grahas
+    if (state.overlays.stars) {
+      drawFieldStars(w, h);
+      drawConstellationArt(w, h);
+      drawConstellations(w, h);
+    }
 
-    // ── Red ecliptic spine (reference style) under belts / grahas ──
-    if (state.overlays.stars || state.overlays.rasi || state.overlays.nakshatra) {
+    // Red ecliptic spine
+    if (state.overlays.stars || state.overlays.rasi || state.overlays.nakshatra || state.overlays.map) {
       drawEclipticSpine(w, h);
     }
 
-    // ── Sky belts (zodiac + nakṣatra) under graha markers ──
+    // Optional gaṇita belts (off by default in map mode for cleaner look)
     if (state.overlays.rasi) drawZodiacBelt(w, h);
     if (state.overlays.nakshatra) drawNakshatraBelt(w, h);
 
-    // ── Floating N/NE/E/SE… badges (reference SE pill) ──
+    // Floating N/NE/E/SE… badges
     drawCompassBadges(w, h);
 
     let nearest = null;
@@ -1542,12 +1768,7 @@
         continue;
       }
 
-      let r = 8;
-      if (obj.kind === "iss") r = 11;
-      else if (obj.label === "Sūrya") r = 16;
-      else if (obj.label === "Candra") r = 14;
-      else if (obj.label === "Śani" || obj.id === "graha:Saturn") r = 13;
-      else if (obj.mag != null && obj.mag < 0) r = 11;
+      const r = grahaDrawRadius(obj);
 
       const alpha = p.inFov ? 1 : isTarget ? 0.9 : obj.alt < 0 ? 0.45 : 0.55;
       ctx.save();
@@ -1616,19 +1837,14 @@
         ctx.fillText(line2, lx, ly + 15);
       }
 
-      // Target reticle — solid white ring like reference (not dashed gold)
+      // Target reticle — thin white circle like reference around Saturn
       if (isTarget) {
         ctx.globalAlpha = 1;
-        const rr = isSaturn ? r + 22 : r + 16;
+        const rr = isSaturn ? r * 1.55 : r + 16;
         ctx.beginPath();
         ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255,0.95)";
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(px, py, rr + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255,0.35)";
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth = 1.4;
         ctx.stroke();
       }
       ctx.restore();
@@ -2061,6 +2277,10 @@
   }
 
   const LAYER_COPY = {
+    map: {
+      title: "Planetarium",
+      hint: "Black sky map · like Sky Guide (not camera AR)",
+    },
     graha: {
       title: "Graha · all 9",
       hint: "Sūrya…Ketu · Raman · always all 9 in list",
@@ -2075,7 +2295,7 @@
     },
     stars: {
       title: "Constellations",
-      hint: "Stick figures + bright stars · landmarks for the eye",
+      hint: "White figure art · cyan sticks · field stars",
     },
     iss: {
       title: "ISS",
@@ -2189,6 +2409,7 @@
     }
     if (els.findFabLabel) {
       const map = {
+        map: "Map",
         graha: "Graha",
         nakshatra: "Nakṣatra",
         rasi: "Zodiac",
@@ -2215,8 +2436,9 @@
     if (!Object.values(state.overlays).some(Boolean)) {
       state.overlays[layer] = true;
     }
-    state.activeLayer = layer;
+    state.activeLayer = layer === "map" ? "graha" : layer;
     if (layer === "iss") refreshISS(true).catch(() => {});
+    if (layer === "map") applyCameraVisibility();
     updateLayerChrome();
     if (state.findOpen) buildObjectList();
   }
@@ -2662,6 +2884,7 @@
 
   function init() {
     loadSavedAlign();
+    applyCameraVisibility(); // planetarium map ON by default (reference look)
     try {
       resizeCanvas();
     } catch (err) {
@@ -2698,6 +2921,8 @@
       );
     } else if (!X()) {
       showGateError("Sky extras not loaded. Hard-refresh the page.");
+    } else if (!S() || !Art()) {
+      showGateError("Star/art catalogs not loaded. Hard-refresh (?v=14).");
     }
     const clearTarget = () => {
       state.targetId = null;
@@ -2724,11 +2949,11 @@
     els.layerCards?.forEach((card) => {
       card.addEventListener("click", (ev) => {
         const layer = card.getAttribute("data-layer");
-        // Toggle overlay on camera
         toggleOverlay(layer);
-        // Double-purpose: open Find list for this layer (graha shows all 9)
-        state.activeLayer = layer;
         setLayersOpen(false);
+        // Map is a view mode only — no Find list
+        if (layer === "map") return;
+        state.activeLayer = layer;
         setFindOpen(true);
         buildObjectList();
       });
