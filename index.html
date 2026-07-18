@@ -19,7 +19,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=22" />
+  <link rel="stylesheet" href="styles.css?v=23" />
 </head>
 <body class="clean-ui">
   <div id="app">
@@ -39,6 +39,22 @@
     <div id="brandWatermark" class="brand-watermark" aria-hidden="true">
       <span class="logo">✦</span>
       <span>Raman Sky Guide</span>
+    </div>
+
+    <!-- First few visits: short how-to -->
+    <div id="howtoOverlay" class="howto-overlay hidden" role="dialog" aria-labelledby="howtoTitle" aria-modal="true">
+      <div class="howto-card">
+        <h2 id="howtoTitle" class="howto-title">Raman Sky Guide</h2>
+        <p class="howto-lead">Shows grahas, nakṣatras, and rāśis in the sky — right now, from where you are.</p>
+        <ol class="howto-steps">
+          <li><strong>Drag</strong> the sky to look around. Or point your phone.</li>
+          <li>Tap <strong>⌕</strong> → pick a graha (or constellation).</li>
+          <li>Tap <strong>☰</strong> for layers, Align, zoom.</li>
+          <li>Labels drift? Tap <strong>◎</strong>, then Align on the Moon.</li>
+        </ol>
+        <p class="howto-note">Raman ayanāṃśa. Camera is optional (in menu).</p>
+        <button type="button" id="btnHowtoGotIt" class="primary-btn wide">Got it</button>
+      </div>
     </div>
 
     <div class="crosshair" aria-hidden="true">
@@ -217,9 +233,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=22"></script>
-  <script src="stars-constellations.js?v=22"></script>
-  <script src="constellation-art.js?v=22"></script>
-  <script src="app.js?v=22"></script>
+  <script src="astro-extras.js?v=23"></script>
+  <script src="stars-constellations.js?v=23"></script>
+  <script src="constellation-art.js?v=23"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

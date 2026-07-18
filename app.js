@@ -46,6 +46,8 @@
     btnCalibrate: $("btnCalibrate"),
     btnRecalibrate: $("btnRecalibrate"),
     btnRecalibrateMenu: $("btnRecalibrateMenu"),
+    howtoOverlay: $("howtoOverlay"),
+    btnHowtoGotIt: $("btnHowtoGotIt"),
     btnLayers: $("btnLayers"),
     btnFind: $("btnFind"),
     btnCloseLayers: $("btnCloseLayers"),
@@ -409,10 +411,43 @@
     }
   }
 
+  const HOWTO_KEY = "ramanSkyHowto";
+  const HOWTO_SHOWS = 3; // first few opens only
+
+  function howtoVisits() {
+    try {
+      const n = parseInt(localStorage.getItem(HOWTO_KEY) || "0", 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function shouldShowHowto() {
+    return howtoVisits() < HOWTO_SHOWS;
+  }
+
+  function showHowtoIfNeeded() {
+    if (!els.howtoOverlay || !shouldShowHowto()) return false;
+    els.howtoOverlay.classList.remove("hidden");
+    document.body.classList.add("howto-open");
+    return true;
+  }
+
+  function dismissHowto() {
+    els.howtoOverlay?.classList.add("hidden");
+    document.body.classList.remove("howto-open");
+    try {
+      const n = howtoVisits() + 1;
+      localStorage.setItem(HOWTO_KEY, String(n));
+    } catch (_) {}
+    setStatus("Drag to look · ⌕ find · ☰ menu", "ok");
+  }
+
   function isUiChrome(el) {
     if (!el || !el.closest) return false;
     return !!el.closest(
-      "button, a, input, label, select, textarea, .map-panel, .find-panel, .gate, .info-card, .align-banner, .chrome-btn, .guide-dock"
+      "button, a, input, label, select, textarea, .map-panel, .find-panel, .gate, .info-card, .align-banner, .chrome-btn, .guide-dock, .howto-overlay"
     );
   }
 
@@ -3590,14 +3625,17 @@
         setManualLook(true, null);
       }
 
-      setStatus(
-        notes.length
-          ? "Live with limits: " + notes.join(", ") + ". Drag to look."
-          : PLATFORM.mobile
-            ? "Live. Point the device, or drag to look."
-            : "Live. Drag to look around. Arrow keys pan.",
-        notes.length ? "warn" : "ok"
-      );
+      const showedHowto = showHowtoIfNeeded();
+      if (!showedHowto) {
+        setStatus(
+          notes.length
+            ? "Live with limits: " + notes.join(", ") + ". Drag to look."
+            : PLATFORM.mobile
+              ? "Live. Point the device, or drag to look."
+              : "Live. Drag to look around. Arrow keys pan.",
+          notes.length ? "warn" : "ok"
+        );
+      }
       syncGuidingUi();
       requestAnimationFrame(tick);
     } catch (err) {
@@ -3723,6 +3761,7 @@
       onRecal(e);
       setLayersOpen(false);
     });
+    els.btnHowtoGotIt?.addEventListener("click", () => dismissHowto());
     els.btnLayers?.addEventListener("click", () => setLayersOpen(!state.layersOpen));
     els.btnCloseLayers?.addEventListener("click", () => setLayersOpen(false));
     els.btnFind?.addEventListener("click", () => setFindOpen(!state.findOpen));

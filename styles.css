@@ -58,6 +58,69 @@ body.manual-look .brand-watermark::after {
   letter-spacing: 0.02em;
 }
 
+/* First-visit how-to */
+.howto-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 36;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+.howto-overlay.hidden { display: none; }
+.howto-card {
+  width: 100%;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: 1.2rem 1.15rem calc(1.2rem + var(--safe-b));
+  border-radius: 1.2rem 1.2rem 0 0;
+  background: rgba(12, 16, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: none;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+}
+@media (min-width: 480px) {
+  .howto-overlay { align-items: center; padding: 1.25rem; }
+  .howto-card {
+    border-radius: 1.1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}
+.howto-title {
+  margin: 0 0 0.45rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #f4f7ff;
+}
+.howto-lead {
+  margin: 0 0 0.85rem;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: rgba(220, 228, 245, 0.92);
+}
+.howto-steps {
+  margin: 0 0 0.75rem;
+  padding-left: 1.15rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(210, 220, 240, 0.95);
+}
+.howto-steps li { margin-bottom: 0.4rem; }
+.howto-steps strong { color: #fff; }
+.howto-note {
+  margin: 0 0 1rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+body.howto-open .chrome-btn {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 #camera {
   position: absolute;
   inset: 0;
