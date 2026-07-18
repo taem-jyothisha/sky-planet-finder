@@ -214,8 +214,8 @@
 
   /**
    * Effective FOV after object-fit:cover + zoom.
-   * Phones often report landscape video buffers while UI is portrait —
-   * we match buffer axes to the upright display before computing cover crop.
+   * Clamp base FOV at 1×, THEN divide by zoom (old code floored after /z
+   * so 2×–8× never narrowed projection — zoom broke identify).
    */
   function viewFov() {
     const z = Math.max(0.5, state.zoom || 1);
@@ -225,8 +225,7 @@
     const { w: sw, h: sh } = cssSize();
     const screenAspect = sw / Math.max(1, sh);
 
-    // If buffer is landscape but screen is portrait (or vice versa), swap buffer axes
-    // so "width" matches the displayed upright frame after CSS cover.
+    // Landscape buffer on portrait UI (or reverse): swap so cover math matches screen
     let videoAspect = vw / Math.max(1, vh);
     if (
       (screenAspect < 1 && videoAspect > 1.15) ||
@@ -238,31 +237,34 @@
       videoAspect = vw / Math.max(1, vh);
     }
 
-    // Base optical FOV on the wider sensor axis ≈ BASE_H at 1×
-    const fullW = BASE_H_FOV_1X / z;
-    const fullH =
-      ((2 * Math.atan(Math.tan(((fullW / 2) * Math.PI) / 180) * (vh / vw))) *
+    // 1× optical FOV on wider axis, then aspect for height
+    const fullW1 = BASE_H_FOV_1X;
+    const fullH1 =
+      ((2 * Math.atan(Math.tan(((fullW1 / 2) * Math.PI) / 180) * (vh / vw))) *
         180) /
       Math.PI;
 
-    // object-fit: cover visible fractions
     const scale = Math.max(sw / vw, sh / vh);
     const visibleWFrac = Math.min(1, sw / (vw * scale));
     const visibleHFrac = Math.min(1, sh / (vh * scale));
 
-    // Clamp so portrait never collapses to ~15° (kills AR)
-    const h = Math.max(40, Math.min(100, fullW * visibleWFrac));
-    const v = Math.max(50, Math.min(120, fullH * visibleHFrac));
+    // Sanity clamp only at 1× (portrait cover), then zoom narrows freely
+    const baseH = Math.max(35, Math.min(100, fullW1 * visibleWFrac));
+    const baseV = Math.max(40, Math.min(120, fullH1 * visibleHFrac));
+    const h = Math.max(4, baseH / z);
+    const v = Math.max(5, baseV / z);
 
-    return { h, v, fullW, fullH, videoAspect, screenAspect, z };
+    return { h, v, fullW: h, fullH: v, baseH, baseV, videoAspect, screenAspect, z };
   }
 
   /**
    * Rear-camera azimuth (0=N, CW) + altitude (0=horizon, +up) from DeviceOrientation.
    * Device frame: X right, Y top-of-screen, Z out of screen toward user.
-   * Rear camera looks along −Z. Formula from W3C/Opera deviceorientation compass notes.
+   * Rear camera looks along −Z. W3C/Opera notes.
+   * Do NOT apply screen.orientation.angle here — α/β/γ already track physical pose;
+   * re-rotating by UI orientation double-counts landscape (~±90° bugs).
    */
-  function rearCameraAzAlt(alpha, beta, gamma, screenOrientDeg) {
+  function rearCameraAzAlt(alpha, beta, gamma, _screenOrientDeg) {
     const a = (((alpha || 0) % 360) * Math.PI) / 180;
     const b = ((beta || 0) * Math.PI) / 180;
     const g = ((gamma || 0) * Math.PI) / 180;
@@ -274,24 +276,14 @@
     const cG = Math.cos(g);
     const sG = Math.sin(g);
 
-    // World components of the "out the back of the device" vector
-    let rA = -cA * sG - sA * sB * cG;
-    let rB = -sA * sG + cA * sB * cG;
-    let rC = -cB * cG;
+    // World components of the "out the back of the device" vector (−Z)
+    const east = -cA * sG - sA * sB * cG;
+    const north = -sA * sG + cA * sB * cG;
+    const up = -cB * cG;
 
-    // Screen orientation (portrait/landscape) rotation around device Z
-    const o = ((screenOrientDeg || 0) * Math.PI) / 180;
-    const cO = Math.cos(o);
-    const sO = Math.sin(o);
-    const east = rA * cO - rB * sO;
-    const north = rA * sO + rB * cO;
-    const up = rC;
-
-    // Azimuth: atan2(east, north) → 0° north, clockwise positive
     let az = (Math.atan2(east, north) * 180) / Math.PI;
     if (az < 0) az += 360;
 
-    // Altitude: elevation of look vector above horizon
     const horiz = Math.sqrt(east * east + north * north);
     let alt = (Math.atan2(up, horiz) * 180) / Math.PI;
     alt = Math.max(-89, Math.min(89, alt));
@@ -300,19 +292,26 @@
   }
 
   function lookAtThreshold() {
-    const { h } = viewFov();
-    return Math.max(2.5, Math.min(10, h * 0.14));
+    const { h, v } = viewFov();
+    const m = Math.min(h, v);
+    // Widen pick cone when zoomed out; keep usable when zoomed in
+    return Math.max(1.8, Math.min(14, m * 0.2));
   }
 
   function lockThreshold() {
-    const { h } = viewFov();
-    return Math.max(1.8, Math.min(7, h * 0.1));
+    const { h, v } = viewFov();
+    const m = Math.min(h, v);
+    return Math.max(1.2, Math.min(8, m * 0.12));
   }
 
+  /** Layout viewport only — must match #app / crosshair (50%/50%). Never mix visualViewport. */
   function cssSize() {
-    const vv = window.visualViewport;
-    if (vv && vv.width && vv.height) {
-      return { w: Math.round(vv.width), h: Math.round(vv.height) };
+    const app = document.getElementById("app");
+    if (app) {
+      const r = app.getBoundingClientRect();
+      if (r.width > 2 && r.height > 2) {
+        return { w: Math.round(r.width), h: Math.round(r.height) };
+      }
     }
     return { w: window.innerWidth, h: window.innerHeight };
   }
@@ -349,15 +348,22 @@
     if (headingRaw == null || pitchRaw == null) return;
     if (Number.isNaN(headingRaw) || Number.isNaN(pitchRaw)) return;
 
-    // Manual look (drag/keys/desktop) blocks live sensors until recalibrate
     const src = source || "?";
+    const now = performance.now();
+
+    // Accidental drag used to freeze sensors forever — auto-resume after idle
     if (
       state.manualLock &&
       src !== "manual" &&
       src !== "align" &&
       src !== "seed"
     ) {
-      return;
+      const idle = now - (state._manualLockAt || 0);
+      const dragging = !!state._lookDrag;
+      if (dragging || idle < 4500) return;
+      // Resume live sensors
+      state.manualLock = false;
+      document.body.classList.remove("manual-look");
     }
 
     const prevH = state.headingRaw;
@@ -366,27 +372,41 @@
     const dP = prevP == null ? 99 : Math.abs(pitchRaw - prevP);
     const moved = dH + dP > 0.12;
 
-    state.headingRaw = headingRaw;
+    // Sensor path stores true device raw; manual path stores display heading
+    if (src === "manual" || src === "seed" || src === "align") {
+      // display-space write — do not re-add offset/bias below
+      state.headingRaw = headingRaw;
+    } else {
+      state.headingRaw = headingRaw;
+    }
     state.pitchRaw = Math.max(-89, Math.min(89, pitchRaw));
     state.orientSource = src;
     state.orientReady = true;
     if (src !== "manual" && src !== "seed" && src !== "align") {
       state.orientEventCount = (state.orientEventCount || 0) + 1;
     }
-    // Only mark "fresh orient sample" when values actually change (enables gyro rescue)
     if (moved) {
-      state.lastOrientTs = performance.now();
-      state.lastAimMoveTs = performance.now();
+      state.lastOrientTs = now;
+      state.lastAimMoveTs = now;
     }
 
-    // Fast tracking — high alpha so pan feels live
-    const useBias = src !== "manual" && src !== "seed";
-    const hTarget = norm360(
-      headingRaw + state.headingOffset + (useBias ? state.northBias || 0 : 0)
-    );
-    const pTarget =
-      state.pitchRaw + (useBias || src === "align" ? state.pitchOffset : 0);
-    const alpha = src === "manual" ? 1 : 0.85;
+    // Manual/seed: headingRaw is already the on-screen aim (no double offset).
+    // Sensors: fuse raw + user Align offset + slow northBias.
+    let hTarget;
+    let pTarget;
+    if (src === "manual" || src === "seed") {
+      hTarget = norm360(headingRaw);
+      pTarget = state.pitchRaw;
+    } else if (src === "align") {
+      hTarget = norm360(headingRaw);
+      pTarget = state.pitchRaw;
+    } else {
+      hTarget = norm360(
+        headingRaw + (state.headingOffset || 0) + (state.northBias || 0)
+      );
+      pTarget = state.pitchRaw + (state.pitchOffset || 0);
+    }
+    const alpha = src === "manual" || src === "align" ? 1 : 0.88;
     state.smoothHeading = smoothAngle(state.smoothHeading, hTarget, alpha);
     state.smoothPitch = smoothLinear(state.smoothPitch, pTarget, alpha);
     state.heading = state.smoothHeading;
@@ -403,9 +423,13 @@
   function setManualLook(on, msg) {
     state.manualLock = !!on;
     if (on) {
+      state._manualLockAt = performance.now();
       seedLookIfNeeded();
       document.body.classList.add("manual-look");
       if (msg) setStatus(msg, "ok");
+      else if (PLATFORM.mobile) {
+        setStatus("Free look · sensors resume in a few seconds", "ok");
+      }
     } else {
       document.body.classList.remove("manual-look");
     }
@@ -574,11 +598,11 @@
     return c;
   }
 
-  /** Slow north bias from compass — NEVER per-event 15% mix (that freezes iOS) */
+  /** Slow north bias when using matrix yaw — never skip just because compass is stable */
   function maybeUpdateNorthBias(matrixAz, compass) {
     if (compass == null) return;
     const now = performance.now();
-    if (state._lastBiasTs && now - state._lastBiasTs < 500) return;
+    if (state._lastBiasTs && now - state._lastBiasTs < 400) return;
     const acc =
       typeof state._lastCompassAccuracy === "number"
         ? state._lastCompassAccuracy
@@ -586,27 +610,33 @@
     if (acc < 0) return; // iOS: unreliable
 
     const c = compassToLookAz(compass);
-    // Sticky compass: ignore if unchanged while we are moving
-    if (
+    // Sticky *wrong* compass: compass frozen while matrix spins a lot → ignore compass
+    const matrixMoved =
+      state._lastMatrixAzForBias != null &&
+      Math.abs(deltaAngle(state._lastMatrixAzForBias, matrixAz)) > 8;
+    const compassStuck =
       state._lastCompassUsed != null &&
-      Math.abs(deltaAngle(state._lastCompassUsed, c)) < 0.2
-    ) {
+      Math.abs(deltaAngle(state._lastCompassUsed, c)) < 0.15;
+    if (compassStuck && matrixMoved) {
+      state._lastMatrixAzForBias = matrixAz;
       return;
     }
     state._lastCompassUsed = c;
+    state._lastMatrixAzForBias = matrixAz;
     state._lastBiasTs = now;
 
-    // Bias maps matrix az → compass az; apply slowly
     const err = deltaAngle(matrixAz + (state.northBias || 0), c);
-    state.northBias = (state.northBias || 0) + err * 0.08;
+    state.northBias = (state.northBias || 0) + err * 0.12;
   }
 
   function onOrientation(e) {
-    // Prefer absolute when recent; still accept relative if absolute goes quiet
-    // (Android sometimes only sends one stream; iOS often sends both.)
+    // Prefer absolute alpha when recent, but still take relative β/γ if absolute goes quiet
     if (e && e.absolute === false && state._preferAbsolute) {
-      if (state._lastAbsoluteTs && performance.now() - state._lastAbsoluteTs < 1500) {
-        return;
+      if (state._lastAbsoluteTs && performance.now() - state._lastAbsoluteTs < 800) {
+        // Keep absolute for yaw only when we have no compass; still process if absolute is stale
+        if (!state._lastCompass && state._lastAbsoluteTs) {
+          /* fall through only if we need beta — handled below with skip flag */
+        }
       }
     }
 
@@ -618,7 +648,6 @@
       typeof e.gamma === "number" && !Number.isNaN(e.gamma) ? e.gamma : null;
     const alpha =
       typeof e.alpha === "number" && !Number.isNaN(e.alpha) ? e.alpha : null;
-    // iOS Safari compass; Android usually has absolute alpha instead
     const compass =
       typeof e.webkitCompassHeading === "number" &&
       !Number.isNaN(e.webkitCompassHeading)
@@ -634,42 +663,82 @@
 
     if (beta == null && gamma == null && compass == null && alpha == null) return;
 
-    const b = beta != null ? beta : state._lastBeta != null ? state._lastBeta : 90;
-    const g = gamma != null ? gamma : state._lastGamma != null ? state._lastGamma : 0;
+    // Need a full triad for matrix pitch; don't invent beta=90 (flat phone lies)
     if (beta != null) state._lastBeta = beta;
     if (gamma != null) state._lastGamma = gamma;
     if (alpha != null) state._lastAlpha = alpha;
     if (compass != null) state._lastCompass = compass;
     if (gamma != null) state.roll = gamma;
 
-    // LIVE yaw/pitch from device matrix when alpha exists.
-    // Absolute events (common on Android) are Earth-referenced.
-    // iOS webkitCompassHeading still used for slow north bias when present.
-    if (alpha != null) {
-      const aim = rearCameraAzAlt(alpha, b, g, state.screenAngle);
-      if (compass != null && Math.abs(aim.alt) < 65) {
-        maybeUpdateNorthBias(aim.az, compass);
-      } else if (e.absolute === true) {
-        // Absolute alpha: trust as north-referenced (no webkit compass on Android)
-        state.northBias = state.northBias || 0;
+    const b = beta != null ? beta : state._lastBeta;
+    const g = gamma != null ? gamma : state._lastGamma != null ? state._lastGamma : 0;
+    if (b == null) {
+      // Compass-only yaw if we have no tilt yet
+      if (compass != null) {
+        const h0 = state.pitchRaw != null ? state.pitchRaw : 35;
+        applyAim(compassToLookAz(compass), h0, "compass-only");
       }
-      applyAim(
-        aim.az,
-        aim.alt,
-        e.absolute ? "abs-matrix" : compass != null ? "matrix+compass" : "matrix"
-      );
       return;
     }
 
-    if (compass != null) {
-      // iOS: compass for yaw, tilt for pitch
-      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+    const compassOk =
+      compass != null &&
+      (typeof state._lastCompassAccuracy !== "number" ||
+        state._lastCompassAccuracy >= 0);
+
+    // Detect frozen orientation stream (same α/β/γ while phone moves)
+    const sampleKey =
+      (alpha != null ? alpha.toFixed(2) : "x") +
+      "|" +
+      b.toFixed(2) +
+      "|" +
+      g.toFixed(2);
+    if (state._lastOrientSampleKey === sampleKey) {
+      state._orientFrozenMs = (state._orientFrozenMs || 0) + 16;
+    } else {
+      state._lastOrientSampleKey = sampleKey;
+      state._orientFrozenMs = 0;
+      state._gyroOwnsAim = false;
+    }
+    // While gyro rescue owns aim, skip overwriting with frozen DO samples
+    if (state._gyroOwnsAim && (state._orientFrozenMs || 0) > 120) {
+      return;
+    }
+
+    // CRITICAL (iOS): webkitCompassHeading is true north reference.
+    // Relative alpha must NOT own yaw — only pitch/roll from matrix.
+    if (compassOk && (PLATFORM.iOS || e.absolute !== true)) {
+      const aim = rearCameraAzAlt(
+        alpha != null ? alpha : state._lastAlpha || 0,
+        b,
+        g,
+        0
+      );
       applyAim(compassToLookAz(compass), aim.alt, "compass+tilt");
       return;
     }
 
-    // Tilt-only: still update pitch
-    const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
+    // Android absolute (or no compass): matrix yaw is Earth-referenced
+    if (alpha != null) {
+      const aim = rearCameraAzAlt(alpha, b, g, 0);
+      if (compassOk && Math.abs(aim.alt) < 70) {
+        maybeUpdateNorthBias(aim.az, compass);
+      }
+      applyAim(
+        aim.az,
+        aim.alt,
+        e.absolute ? "abs-matrix" : "matrix"
+      );
+      return;
+    }
+
+    if (compassOk) {
+      const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, 0);
+      applyAim(compassToLookAz(compass), aim.alt, "compass+tilt");
+      return;
+    }
+
+    const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, 0);
     const h = state.headingRaw != null ? state.headingRaw : aim.az;
     applyAim(h, aim.alt, "tilt-only");
   }
@@ -704,9 +773,12 @@
     const gyroSpin = Math.abs(ra) + Math.abs(rb) + Math.abs(rg);
     if (gyroSpin < 4) return;
 
-    // Rescue when aim values are flat even if orient events keep firing
+    // Rescue when DO samples frozen or aim stuck while phone is turning
     const aimAge = now - (state.lastAimMoveTs || 0);
-    if (aimAge < 100 && gyroSpin < 25) return;
+    const orientFrozen = (state._orientFrozenMs || 0) > 150;
+    if (!orientFrozen && aimAge < 100 && gyroSpin < 25) return;
+    if (orientFrozen && gyroSpin > 8) state._gyroOwnsAim = true;
+    if (!state._gyroOwnsAim && aimAge < 100) return;
 
     let yawRate = 0;
     let pitchRate = 0;
@@ -725,13 +797,14 @@
       pitchRate = -rb;
     }
 
-    const gain = aimAge > 200 ? 1.15 : 0.7;
-    const h0 = state.headingRaw != null ? state.headingRaw : 0;
-    const p0 = state.pitchRaw != null ? state.pitchRaw : 30;
+    const gain = orientFrozen ? 1.25 : aimAge > 200 ? 1.15 : 0.7;
+    const h0 = state.heading != null ? state.heading : state.headingRaw != null ? state.headingRaw : 0;
+    const p0 = state.pitch != null ? state.pitch : state.pitchRaw != null ? state.pitchRaw : 30;
+    // Write as manual-space so offset isn't double-applied during rescue
     applyAim(
       norm360(h0 + yawRate * dt * gain),
       Math.max(-89, Math.min(89, p0 + pitchRate * dt * gain)),
-      "gyro"
+      state._gyroOwnsAim ? "manual" : "gyro"
     );
   }
 
@@ -2244,10 +2317,21 @@
 
   // ── Projection ───────────────────────────────────────────────────────
 
+  /** True angular separation (degrees) between two az/alt points */
+  function angularDistance(az1, alt1, az2, alt2) {
+    const a1 = (alt1 * Math.PI) / 180;
+    const a2 = (alt2 * Math.PI) / 180;
+    const dAz = (deltaAngle(az1, az2) * Math.PI) / 180;
+    const cos =
+      Math.sin(a1) * Math.sin(a2) +
+      Math.cos(a1) * Math.cos(a2) * Math.cos(dAz);
+    return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
+  }
+
   /**
    * Project sky az/alt → screen pixels.
    * Optical center = screen center (must match crosshair).
-   * Linear degrees→pixels is fine within ~half FOV; clamp far off-screen.
+   * Uses cos(alt) for horizontal scale; true spherical angDist for pick/lock.
    */
   function project(obj) {
     if (state.heading == null || state.pitch == null) return null;
@@ -2256,18 +2340,94 @@
     const { w, h } = cssSize();
     const fov = viewFov();
 
-    // Pixels per degree (from center)
     const ppdX = w / fov.h;
     const ppdY = h / fov.v;
+    // Horizontal compression near zenith
+    const midAlt = ((obj.alt + state.pitch) * 0.5 * Math.PI) / 180;
+    const cosAlt = Math.max(0.12, Math.cos(midAlt));
 
-    const x = w / 2 + dAz * ppdX;
+    const x = w / 2 + dAz * cosAlt * ppdX;
     const y = h / 2 - dAlt * ppdY;
-    const angDist = Math.hypot(dAz, dAlt);
-    const margin = 1.02;
+    const angDist = angularDistance(
+      state.heading,
+      state.pitch,
+      obj.az,
+      obj.alt
+    );
+    const margin = 1.05;
     const inFov =
-      Math.abs(dAz) < (fov.h / 2) * margin &&
+      Math.abs(dAz * cosAlt) < (fov.h / 2) * margin &&
       Math.abs(dAlt) < (fov.v / 2) * margin;
-    return { x, y, dAz, dAlt, angDist, inFov, fov, ppdX, ppdY };
+    return { x, y, dAz, dAlt, angDist, inFov, fov, ppdX, ppdY, cosAlt };
+  }
+
+  /** Resolve Find target across grahas, ISS, stars, constellations */
+  function resolveTarget(id) {
+    if (!id) return null;
+    const fromSky = state.objects.find((o) => o.id === id);
+    if (fromSky) return fromSky;
+    if (String(id).indexOf("star:") === 0) {
+      const key = String(id).slice(5);
+      const s = state.starCache && state.starCache[key];
+      return s || null;
+    }
+    if (String(id).indexOf("const:") === 0) {
+      const list = buildConstellationObjects();
+      return list.find((o) => o.id === id) || null;
+    }
+    return null;
+  }
+
+  function buildConstellationObjects() {
+    if (!S()) return [];
+    computeStars();
+    const cache = state.starCache || {};
+    return S().CONSTELLATIONS.map((c) => {
+      let n = 0;
+      let az = 0;
+      let alt = 0;
+      const names = new Set();
+      for (const [a, b] of c.lines) {
+        names.add(a);
+        names.add(b);
+      }
+      for (const k of names) {
+        const s = cache[k];
+        if (!s || s.alt < -10) continue;
+        az += s.az;
+        alt += s.alt;
+        n++;
+      }
+      if (!n) {
+        return {
+          id: "const:" + c.id,
+          kind: "stars",
+          label: c.label,
+          sub: (c.hint || "") + " · below horizon",
+          detail: "Pan until it rises. Align if labels drift.",
+          color: "#a8c0ff",
+          az: 0,
+          alt: -90,
+          skyRole: { badge: "Set", code: "set" },
+        };
+      }
+      return {
+        id: "const:" + c.id,
+        kind: "stars",
+        label: c.label,
+        sub: c.hint,
+        detail:
+          OBJECT_BLURB["const:" + c.id] ||
+          "Sky pattern. Not a rāśi boundary.",
+        color: "#a8c0ff",
+        az: az / n,
+        alt: alt / n,
+        skyRole: {
+          badge: alt / n > 5 ? "Up" : "Low",
+          code: alt / n > 5 ? "visible" : "horizon",
+        },
+      };
+    });
   }
 
   /** Keep marker on-screen edge with a direction tick if off-FOV */
@@ -2368,7 +2528,6 @@
     drawCompassBadges(w, h);
 
     let nearest = null;
-    let nearestPointlike = null;
 
     // Lagna / udaya marker (eastern ecliptic rise)
     if (state.skyLagna && state.orientReady) {
@@ -2410,23 +2569,44 @@
       }
     }
 
-    // Point markers: all 9 grahas when overlay on + ISS + selected target
+    // Point markers: grahas + ISS + bright stars + selected target (any kind)
     const points = state.objects.filter((o) => {
       if (o.id === state.targetId) return true;
       if (o.kind === "graha" && state.overlays.graha) return true;
       if (o.kind === "iss" && state.overlays.iss) return true;
       return false;
     });
+    // Named catalog stars for identify-under-crosshair
+    if (state.overlays.stars && state.starCache) {
+      for (const key of Object.keys(state.starCache)) {
+        const s = state.starCache[key];
+        if (!s || s.alt < -5) continue;
+        if (s.mag != null && s.mag > 2.6) continue; // bright only for pick
+        points.push(s);
+      }
+    }
+    // Selected constellation centroid
+    if (state.targetId && String(state.targetId).indexOf("const:") === 0) {
+      const t = resolveTarget(state.targetId);
+      if (t && !points.some((p) => p.id === t.id)) points.push(t);
+    }
+    if (state.targetId && String(state.targetId).indexOf("star:") === 0) {
+      const t = resolveTarget(state.targetId);
+      if (t && !points.some((p) => p.id === t.id)) points.push(t);
+    }
 
     for (const obj of points) {
       const p = project(obj);
       if (!p) continue;
 
-      if (obj.kind === "graha" || obj.kind === "iss") {
+      // Nearest pickable for identify (graha, iss, star, constellation)
+      if (
+        obj.kind === "graha" ||
+        obj.kind === "iss" ||
+        obj.kind === "star" ||
+        obj.kind === "stars"
+      ) {
         if (!nearest || p.angDist < nearest.angDist) nearest = { obj, ...p };
-        if (!nearestPointlike || p.angDist < nearestPointlike.angDist) {
-          nearestPointlike = { obj, ...p };
-        }
       }
 
       const isTarget = obj.id === state.targetId;
@@ -2539,17 +2719,15 @@
     }
 
     drawRadar(w, h);
-    const focus = nearestPointlike || nearest;
+    const focus = nearest;
     updateHud(focus);
-    // Info card: selected target, else object under crosshair (map look)
+    // Info card: selected target, else any object under crosshair
     if (state.targetId) {
-      const t = state.objects.find((o) => o.id === state.targetId);
-      updateInfoCard(t || null);
+      updateInfoCard(resolveTarget(state.targetId));
     } else if (
       focus &&
       focus.obj &&
-      focus.angDist < lookAtThreshold() &&
-      (focus.obj.kind === "graha" || focus.obj.kind === "iss")
+      focus.angDist < lookAtThreshold()
     ) {
       updateInfoCard(focus.obj);
     } else {
@@ -2873,7 +3051,7 @@
   }
 
   function updateGuide() {
-    const target = state.objects.find((o) => o.id === state.targetId);
+    const target = resolveTarget(state.targetId);
     const clearEdges = () => {
       setEdge(els.edgeLeft, false, "◀");
       setEdge(els.edgeRight, false, "▶");
@@ -2907,8 +3085,8 @@
     const p = project(target);
     if (!p) return;
 
-    // Locked on — on screen near center
-    if (p.angDist < lockThreshold() && p.inFov) {
+    // Locked on — near center (angular only; FOV box was unreliable when zoomed)
+    if (p.angDist < lockThreshold()) {
       els.guidePanel?.classList.add("hidden");
       els.lockedBadge?.classList.remove("hidden");
       clearEdges();
@@ -3011,58 +3189,23 @@
     if (state.activeLayer === "camera") return [];
     // Constellation list = named patterns + yoga-tārā anchors
     if (state.activeLayer === "stars") {
-      if (!S()) return [];
+      const items = buildConstellationObjects();
+      // Also list bright named stars for Find → identify
       computeStars();
       const cache = state.starCache || {};
-      const items = S().CONSTELLATIONS.map((c) => {
-        // centroid alt/az from member stars above horizon
-        let n = 0;
-        let az = 0;
-        let alt = 0;
-        const names = new Set();
-        for (const [a, b] of c.lines) {
-          names.add(a);
-          names.add(b);
-        }
-        for (const k of names) {
-          const s = cache[k];
-          if (!s || s.alt < -10) continue;
-          az += s.az;
-          alt += s.alt;
-          n++;
-        }
-        if (!n) {
-          return {
-            id: "const:" + c.id,
-            kind: "stars",
-            label: c.label,
-            sub: c.hint + " · below horizon",
-            detail: "Pan until it rises. Align if labels drift.",
-            color: "#a8c0ff",
-            az: 0,
-            alt: -90,
-            skyRole: { badge: "Set", code: "set" },
-          };
-        }
-        return {
-          id: "const:" + c.id,
-          kind: "stars",
-          label: c.label,
-          sub: c.hint,
-          detail:
-            OBJECT_BLURB["const:" + c.id] ||
-            "Sky pattern. Not a rāśi boundary.",
-          color: "#a8c0ff",
-          az: az / n,
-          alt: alt / n,
-          skyRole: {
-            badge: alt / n > 5 ? "Up" : "Low",
-            code: alt / n > 5 ? "visible" : "horizon",
-          },
-        };
-      });
-      // Put up patterns first
-      items.sort((a, b) => (b.alt > 0 ? 1 : 0) - (a.alt > 0 ? 1 : 0) || b.alt - a.alt);
+      for (const key of Object.keys(cache)) {
+        const s = cache[key];
+        if (!s || s.mag == null || s.mag > 2.2) continue;
+        items.push({
+          ...s,
+          sub: s.nak ? "Yoga-tārā · " + s.nak : "Bright star",
+          detail: "Point the crosshair to lock.",
+        });
+      }
+      items.sort(
+        (a, b) =>
+          (b.alt > 0 ? 1 : 0) - (a.alt > 0 ? 1 : 0) || b.alt - a.alt
+      );
       return items;
     }
 
@@ -3221,7 +3364,7 @@
       // Dock optional — keep clean; info card carries the focus
       els.guideDock?.classList.add("hidden");
       els.pointingHud?.classList.add("dim");
-      const t = state.objects.find((o) => o.id === state.targetId);
+      const t = resolveTarget(state.targetId);
       if (els.dockTarget) els.dockTarget.textContent = t ? t.label : "Target";
       if (els.dockHint) {
         const p = t && project(t);
@@ -3394,8 +3537,13 @@
     // Ensure this overlay is on when focusing Find list
     if (layer in state.overlays) state.overlays[layer] = true;
     if (state.targetId) {
-      const t = state.objects.find((o) => o.id === state.targetId);
-      if (!t || t.kind !== layer) state.targetId = null;
+      const t = resolveTarget(state.targetId);
+      // Keep star/const targets when switching to stars layer
+      const kindOk =
+        t &&
+        (t.kind === layer ||
+          (layer === "stars" && (t.kind === "star" || t.kind === "stars")));
+      if (!kindOk) state.targetId = null;
     }
     if (layer === "iss") refreshISS(true).catch(() => {});
     updateLayerChrome();
@@ -3440,7 +3588,7 @@
    * we set offsets so model az/alt match current device aim.
    */
   function calibrateToAim() {
-    let body = state.objects.find((o) => o.id === state.targetId);
+    let body = resolveTarget(state.targetId);
     if (!body || body.alt < -2) {
       body = state.objects.find(
         (o) =>
@@ -3460,13 +3608,17 @@
       return;
     }
 
-    // Current raw device aim should equal body sky position after offset
+    // Zero compass bias so Align is not immediately undone by northBias
+    state.northBias = 0;
+    // Device raw (+ bias0) + offset = body sky position
     state.headingOffset = deltaAngle(state.headingRaw, body.az);
     state.pitchOffset = body.alt - state.pitchRaw;
     state.heading = body.az;
     state.pitch = body.alt;
     state.smoothHeading = body.az;
     state.smoothPitch = body.alt;
+    state.manualLock = false;
+    document.body.classList.remove("manual-look");
 
     // Persist for session
     try {
