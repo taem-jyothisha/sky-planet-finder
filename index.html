@@ -13,25 +13,69 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=17" />
 </head>
 <body class="clean-ui">
   <div id="app">
     <video id="camera" playsinline webkit-playsinline muted autoplay></video>
     <canvas id="skyCanvas" aria-hidden="true"></canvas>
 
-    <!-- Clean fullscreen chrome: only corner icons until drawers open -->
+    <!-- Clean fullscreen chrome: corner icons until drawers open -->
     <button type="button" id="btnLayers" class="chrome-btn chrome-left" aria-label="Menu · layers" aria-expanded="false" aria-controls="layerPanel">
       <span class="chrome-glyph" aria-hidden="true">☰</span>
     </button>
     <button type="button" id="btnFind" class="chrome-btn chrome-right" aria-label="Find" aria-expanded="false" aria-controls="findPanel">
       <span class="chrome-glyph" aria-hidden="true">⌕</span>
     </button>
+    <button type="button" id="btnRecalibrate" class="chrome-btn chrome-recal" aria-label="Recalibrate sensors and compass" title="Recalibrate compass · gyro · GPS">
+      <span class="chrome-glyph recal-icon" aria-hidden="true">◎</span>
+    </button>
 
     <!-- Optional brand watermark (fades after start) -->
     <div id="brandWatermark" class="brand-watermark" aria-hidden="true">
       <span class="logo">✦</span>
       <span>Raman Sky Guide</span>
+    </div>
+
+    <!-- Opening teaching overlay: navagrahas + nakṣatras -->
+    <div id="introOverlay" class="intro-overlay hidden" role="dialog" aria-labelledby="introTitle" aria-modal="true">
+      <div class="intro-card">
+        <p class="intro-kicker">Raman ayanāṃśa only</p>
+        <h2 id="introTitle" class="intro-title">Navagrahas &amp; Nakṣatras</h2>
+        <div class="intro-body">
+          <section>
+            <h3>Navagrahas — the nine</h3>
+            <p>
+              <strong>Sūrya, Candra, Maṅgala, Budha, Guru, Śukra, Śani, Rāhu, Ketu.</strong>
+              Seven are lights you can often see; Rāhu and Ketu are the lunar nodes —
+              <em>chāyā</em> points (shadows), not stars. In this guide each graha shows
+              its Raman <strong>rāśi</strong>, degree, <strong>nakṣatra</strong>, and <strong>pāda</strong>.
+            </p>
+          </section>
+          <section>
+            <h3>Nakṣatras — the 27 mansions</h3>
+            <p>
+              The ecliptic is divided into <strong>27 nakṣatras</strong> (Aśvinī → Revatī),
+              each 13°20′, with four <strong>pādas</strong>. Candra’s nakṣatra is the daily
+              “star of the day” language of jyotiṣa; grahas sit in these mansions too.
+              Turn on the Nakṣatra layer to see the belt on the sky.
+            </p>
+          </section>
+          <section>
+            <h3>Rāśis — the 12 signs</h3>
+            <p>
+              Twelve equal <strong>rāśis</strong> (Meṣa → Mīna) measure the same ecliptic
+              in Raman sidereal. Zodiac belt layer draws them as a band; Planetarium mode
+              keeps a red ecliptic spine for orientation.
+            </p>
+          </section>
+          <p class="intro-tip">
+            Tip: tap <strong>◎</strong> anytime to recalibrate compass, gyro, and GPS.
+            Wave the phone in a figure‑8, then Align on the Moon if labels drift.
+          </p>
+        </div>
+        <button type="button" id="btnIntroContinue" class="primary-btn wide">Continue to sky</button>
+      </div>
     </div>
 
     <div class="crosshair" aria-hidden="true">
@@ -129,7 +173,8 @@
       </div>
 
       <div class="drawer-tools">
-        <button type="button" id="btnCalibrate" class="primary-btn wide">Align on target</button>
+        <button type="button" id="btnCalibrate" class="primary-btn wide">Align on target (sky lock)</button>
+        <button type="button" id="btnRecalibrateMenu" class="text-btn">Recalibrate sensors · compass · GPS</button>
         <label class="check-tool panel-check">
           <input type="checkbox" id="onlyAbove" />
           List: only above horizon
@@ -198,23 +243,24 @@
       <div class="gate-card">
         <div class="gate-icon">✦</div>
         <h1 class="gate-title">Raman Sky Guide</h1>
-        <p class="gate-tag">Night sky · grahas · nakṣatras · rāśis</p>
+        <p class="gate-tag">Navagrahas · nakṣatras · rāśis · Raman</p>
         <p class="gate-copy">
-          Point your phone at the sky. Planetarium map with constellation art,
-          Raman ayanāṃśa only. Tap ☰ for layers, ⌕ to find a target.
+          Point your phone at the night sky. Learn the nine grahas and twenty‑seven
+          nakṣatras under <strong>Raman ayanāṃśa</strong> only — constellation art,
+          planetarium map, and camera AR.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
         <p id="gateError" class="error" hidden></p>
-        <p class="gate-foot">Free · works in Safari · Add to Home Screen</p>
+        <p class="gate-foot">Free · Safari · Add to Home Screen · ☰ layers · ⌕ find · ◎ recalibrate</p>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=16"></script>
-  <script src="stars-constellations.js?v=16"></script>
-  <script src="constellation-art.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="astro-extras.js?v=17"></script>
+  <script src="stars-constellations.js?v=17"></script>
+  <script src="constellation-art.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

@@ -20,6 +20,10 @@
     btnStart: $("btnStart"),
     btnClearTarget: $("btnClearTarget"),
     btnCalibrate: $("btnCalibrate"),
+    btnRecalibrate: $("btnRecalibrate"),
+    btnRecalibrateMenu: $("btnRecalibrateMenu"),
+    btnIntroContinue: $("btnIntroContinue"),
+    introOverlay: $("introOverlay"),
     btnLayers: $("btnLayers"),
     btnFind: $("btnFind"),
     btnCloseLayers: $("btnCloseLayers"),
@@ -524,12 +528,16 @@
       screen.orientation.addEventListener("change", updateScreenAngle);
     }
 
+    scheduleSensorHealthCheck();
+  }
+
+  function scheduleSensorHealthCheck() {
     setTimeout(() => {
       if (!state.running) return;
       const moved = performance.now() - (state.lastAimMoveTs || 0) < 3000;
       if ((state.orientEventCount || 0) < 2 && (state.motionEventCount || 0) < 2) {
         setStatus(
-          "No sensors — Settings → Safari → Motion & Orientation ON, then restart",
+          "No sensors — Settings → Safari → Motion & Orientation ON, then ◎",
           "warn"
         );
       } else if (!moved && !state.orientReady) {
@@ -538,6 +546,99 @@
         setStatus("Sensors live · " + (state.orientSource || ""), "ok");
       }
     }, 2800);
+  }
+
+  /**
+   * Recalibrate iPhone inputs: re-ask motion permission, reset compass bias,
+   * soft-reset aim smoothing, refresh GPS. Then user should figure‑8 + Align.
+   * Must be invoked from a user gesture (tap).
+   */
+  async function recalibrateSensors() {
+    const btn = els.btnRecalibrate;
+    if (btn) {
+      btn.classList.add("spinning");
+      btn.classList.remove("flash-ok");
+    }
+    setStatus("Recalibrating compass · gyro · GPS…", "warn");
+
+    // Reset fusion state so a stale north bias cannot stick
+    state.northBias = 0;
+    state.headingOffset = 0;
+    state.pitchOffset = 0;
+    state.smoothHeading = null;
+    state.smoothPitch = null;
+    state.headingRaw = null;
+    state.pitchRaw = null;
+    state.heading = null;
+    state.pitch = null;
+    state.orientReady = false;
+    state.orientEventCount = 0;
+    state.motionEventCount = 0;
+    state._lastCompass = null;
+    state.lastAimMoveTs = 0;
+    try {
+      localStorage.removeItem("skyAlign");
+    } catch (_) {}
+
+    if (els.headingOffset) {
+      els.headingOffset.value = "0";
+      if (els.headingOffsetVal) els.headingOffsetVal.textContent = "0°";
+    }
+    if (els.pitchOffset) {
+      els.pitchOffset.value = "0";
+      if (els.pitchOffsetVal) els.pitchOffsetVal.textContent = "0°";
+    }
+
+    try {
+      // Re-request sensors inside this tap (iOS)
+      await beginSensorPermissionsInGesture();
+    } catch (err) {
+      setStatus(
+        "Motion permission needed — Settings → Safari → Motion & Orientation",
+        "warn"
+      );
+    }
+
+    // Ensure listeners are running
+    if (!state._listenersAttached) {
+      startOrientation();
+    } else {
+      scheduleSensorHealthCheck();
+    }
+    updateScreenAngle();
+
+    // Fresh GPS fix
+    try {
+      await withTimeout(getLocation(), 10000, "Location");
+    } catch (_) {
+      try {
+        await getLocationFallback();
+      } catch (__) {}
+    }
+
+    // Nudge sky recompute
+    state.lastBodyCompute = 0;
+    state.starCacheAt = 0;
+    state.fieldCacheAt = 0;
+
+    setStatus("Wave phone in a figure‑8 · then Align on Candra (Moon)", "ok");
+    els.alignBanner?.classList.remove("hidden");
+    if (btn) {
+      btn.classList.remove("spinning");
+      btn.classList.add("flash-ok");
+      setTimeout(() => btn.classList.remove("flash-ok"), 1600);
+    }
+  }
+
+  function showIntroOverlay() {
+    if (!els.introOverlay) return;
+    els.introOverlay.classList.remove("hidden");
+    document.body.classList.add("intro-open");
+  }
+
+  function hideIntroOverlay() {
+    els.introOverlay?.classList.add("hidden");
+    document.body.classList.remove("intro-open");
   }
 
   /**
@@ -3133,11 +3234,13 @@
       document.body.classList.add("running", "clean-ui");
       closeAllDrawers();
 
-      // Fullscreen sky — drawers only open when user taps ☰ or ⌕
+      // Teaching overlay on navagrahas / nakṣatras, then clean sky
+      showIntroOverlay();
+
       setStatus(
         notes.length
           ? "Live (partial) · " + notes.join(" · ") + " · pan phone"
-          : "Live · pan the sky · tap ☰ or ⌕",
+          : "Live · read intro · then pan · ◎ to recalibrate",
         notes.length ? "warn" : "ok"
       );
       syncGuidingUi();
@@ -3215,6 +3318,19 @@
     els.btnDockClear?.addEventListener("click", clearTarget);
     els.btnCalibrate?.addEventListener("click", calibrateToAim);
     $("btnAlignQuick")?.addEventListener("click", calibrateToAim);
+    const onRecal = (e) => {
+      e.preventDefault();
+      recalibrateSensors().catch(() => {});
+    };
+    els.btnRecalibrate?.addEventListener("click", onRecal);
+    els.btnRecalibrateMenu?.addEventListener("click", (e) => {
+      onRecal(e);
+      setLayersOpen(false);
+    });
+    els.btnIntroContinue?.addEventListener("click", () => {
+      hideIntroOverlay();
+      setStatus("Pan the sky · ☰ layers · ⌕ find · ◎ recalibrate", "ok");
+    });
 
     els.btnLayers?.addEventListener("click", () => setLayersOpen(!state.layersOpen));
     els.btnCloseLayers?.addEventListener("click", () => setLayersOpen(false));
@@ -3253,7 +3369,8 @@
       if (!state.layersOpen && !state.findOpen) return;
       const t = ev.target;
       if (!t || !t.closest) return;
-      if (t.closest(".map-panel, .find-panel, .chrome-btn, .info-card, .gate")) return;
+      if (t.closest(".map-panel, .find-panel, .chrome-btn, .info-card, .gate, .intro-overlay"))
+        return;
       closeAllDrawers();
     });
 
