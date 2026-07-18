@@ -2878,6 +2878,48 @@
     }
 
     drawRadar(w, h);
+
+    // Vision: green/amber ring on real Moon in the camera image
+    if (
+      state.overlays.camera &&
+      state._cvDrawDet &&
+      state.visionMode &&
+      state.visionMode !== "off"
+    ) {
+      const d = state._cvDrawDet;
+      ctx.save();
+      ctx.strokeStyle =
+        state.visionMode === "locked"
+          ? "rgba(109,255,168,0.95)"
+          : "rgba(255,210,122,0.9)";
+      ctx.lineWidth = state.visionMode === "locked" ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, Math.max(8, d.r * 1.15), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill();
+      const moon = getMoonBody();
+      if (moon) {
+        const mp = project(moon);
+        if (mp) {
+          ctx.strokeStyle =
+            state.visionMode === "locked"
+              ? "rgba(109,255,168,0.45)"
+              : "rgba(255,210,122,0.4)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(mp.x, mp.y);
+          ctx.lineTo(d.x, d.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      ctx.restore();
+    }
+
     const focus = nearest;
     updateHud(focus);
     // Info card: selected target, else any object under crosshair
