@@ -104,14 +104,14 @@
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
-    /** Which overlays are drawn (multi-select, Maps-style) */
+    /** Which overlays are drawn (multi-select). Camera off = black sky. */
     overlays: {
-      map: true, // planetarium black sky (reference look) vs camera AR
       graha: true,
-      rasi: false, // off by default — reference is red ecliptic only
-      nakshatra: false,
-      stars: true, // figure art + cyan sticks + field stars
+      rasi: true,
+      nakshatra: true,
+      stars: true,
       iss: false,
+      camera: false, // live rear camera (optional; after ISS in menu)
     },
     showStarNames: true,
     starCache: {}, // name -> {az, alt, mag, name, nak}
@@ -935,11 +935,104 @@
     state.fieldCacheAt = now;
   }
 
+  /** Black sky when camera layer is off */
+  function isPlanetarium() {
+    return !state.overlays.camera;
+  }
+
   function applyCameraVisibility() {
     if (!els.camera) return;
-    // Planetarium map = pure black sky (reference). AR = live camera.
-    els.camera.style.opacity = state.overlays.map ? "0" : "1";
-    document.body.classList.toggle("planetarium", !!state.overlays.map);
+    const on = !!state.overlays.camera;
+    els.camera.style.opacity = on ? "1" : "0";
+    els.camera.style.visibility = on ? "visible" : "hidden";
+    document.body.classList.toggle("planetarium", !on);
+  }
+
+  function stopCamera() {
+    if (state.stream) {
+      try {
+        state.stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+      state.stream = null;
+      state.videoTrack = null;
+    }
+    if (els.camera) {
+      try {
+        els.camera.pause();
+      } catch (_) {}
+      els.camera.srcObject = null;
+    }
+    applyCameraVisibility();
+  }
+
+  /** Start or resume rear camera. Call from a user gesture when possible. */
+  async function ensureCamera() {
+    if (!window.isSecureContext) {
+      throw new Error("Need HTTPS for camera on iPhone.");
+    }
+    const live =
+      state.videoTrack &&
+      state.videoTrack.readyState === "live" &&
+      state.stream;
+    if (live && els.camera && els.camera.srcObject) {
+      try {
+        await els.camera.play();
+      } catch (_) {}
+      applyCameraVisibility();
+      return;
+    }
+    await startCamera();
+    applyCameraVisibility();
+  }
+
+  const PREFS_KEY = "ramanSkyPrefs";
+
+  function loadPrefs() {
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (p && p.overlays && typeof p.overlays === "object") {
+        for (const k of Object.keys(state.overlays)) {
+          if (typeof p.overlays[k] === "boolean") state.overlays[k] = p.overlays[k];
+        }
+        // Old builds used map:true instead of camera:false
+        if (typeof p.overlays.map === "boolean" && typeof p.overlays.camera !== "boolean") {
+          state.overlays.camera = !p.overlays.map;
+        }
+      }
+      if (typeof p.onlyAbove === "boolean") state.onlyAbove = p.onlyAbove;
+      if (typeof p.showStarNames === "boolean") state.showStarNames = p.showStarNames;
+      if (p.activeLayer && typeof p.activeLayer === "string") {
+        state.activeLayer =
+          p.activeLayer === "map" || p.activeLayer === "camera"
+            ? "graha"
+            : p.activeLayer;
+      }
+      // v2: graha + zodiac + nakṣatra on by default for older installs
+      if (!p.version || p.version < 2) {
+        state.overlays.graha = true;
+        state.overlays.rasi = true;
+        state.overlays.nakshatra = true;
+        if (typeof p.overlays?.camera !== "boolean") state.overlays.camera = false;
+      }
+    } catch (_) {}
+  }
+
+  function savePrefs() {
+    try {
+      localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({
+          version: 2,
+          overlays: { ...state.overlays },
+          onlyAbove: !!state.onlyAbove,
+          showStarNames: state.showStarNames !== false,
+          activeLayer: state.activeLayer,
+          at: Date.now(),
+        })
+      );
+    } catch (_) {}
   }
 
   /**
@@ -1043,7 +1136,7 @@
       }
       if (!anyIn) continue;
 
-      const strokeA = state.overlays.map ? 0.92 : 0.7;
+      const strokeA = isPlanetarium() ? 0.92 : 0.7;
       for (const pts of projectedPaths) {
         // Draw continuous segments (break on null)
         let started = false;
@@ -1060,7 +1153,7 @@
         }
         // Soft white glow underlay
         ctx.strokeStyle = "rgba(255, 255, 255, " + strokeA * 0.22 + ")";
-        ctx.lineWidth = state.overlays.map ? 4.5 : 3.2;
+        ctx.lineWidth = isPlanetarium() ? 4.5 : 3.2;
         ctx.stroke();
         // Crisp white figure line
         started = false;
@@ -1076,7 +1169,7 @@
           } else ctx.lineTo(p.x, p.y);
         }
         ctx.strokeStyle = "rgba(255, 255, 255, " + strokeA + ")";
-        ctx.lineWidth = state.overlays.map ? 1.55 : 1.25;
+        ctx.lineWidth = isPlanetarium() ? 1.55 : 1.25;
         ctx.stroke();
       }
     }
@@ -1092,7 +1185,7 @@
     computeStars();
     const cache = state.starCache || {};
     const showNames = state.showStarNames !== false;
-    const map = !!state.overlays.map;
+    const map = isPlanetarium();
 
     ctx.save();
     for (const c of S().CONSTELLATIONS) {
@@ -1434,7 +1527,7 @@
 
   /** Exaggerated planet radius for map mode (Sky Map reference look) */
   function grahaDrawRadius(obj) {
-    const map = !!state.overlays.map;
+    const map = isPlanetarium();
     const z = Math.max(0.6, Math.min(state.zoom || 1, 4));
     const s = Math.sqrt(z);
     if (obj.label === "Sūrya") return map ? 26 * s : 16;
@@ -1960,8 +2053,8 @@
     const { w, h } = cssSize();
     ctx.clearRect(0, 0, w, h);
 
-    // Planetarium map = black sky (reference). AR = transparent over camera.
-    if (state.overlays.map) {
+    // Black sky when camera layer is off; live video under canvas when on.
+    if (isPlanetarium()) {
       drawPlanetariumSky(w, h);
     }
 
@@ -1985,7 +2078,12 @@
     }
 
     // Red ecliptic spine
-    if (state.overlays.stars || state.overlays.rasi || state.overlays.nakshatra || state.overlays.map) {
+    if (
+      state.overlays.stars ||
+      state.overlays.rasi ||
+      state.overlays.nakshatra ||
+      isPlanetarium()
+    ) {
       drawEclipticSpine(w, h);
     }
 
@@ -2118,40 +2216,44 @@
         }
       }
 
-      // Floating labels only in AR / non-map — map uses bottom info card
-      if (!state.overlays.map || (!isTarget && p.angDist > 12)) {
-        if (!state.overlays.map) {
-          const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
-          const label =
-            obj.label +
-            (obj.alt < 0 ? " ↓" : "") +
-            (obj.rasi ? " · " + obj.rasi : "");
-          const line2 =
-            (badge ? badge + " · " : "") +
-            (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
-          ctx.font = "700 12px -apple-system, system-ui, sans-serif";
-          const tw = Math.max(
-            ctx.measureText(label).width,
-            line2 ? ctx.measureText(line2).width : 0
-          );
-          const lx = px - tw / 2;
-          const ly = py - r - (line2 ? 28 : 14);
-          ctx.globalAlpha = Math.min(1, alpha + 0.2);
-          ctx.fillStyle = "rgba(0,0,0,0.72)";
-          roundRect(ctx, lx - 6, ly - 12, tw + 12, line2 ? 32 : 20, 8);
-          ctx.fill();
-          ctx.fillStyle = "#fff";
-          ctx.fillText(label, lx, ly + 2);
-          if (line2) {
-            ctx.font = "600 10px -apple-system, system-ui, sans-serif";
-            ctx.fillStyle = "rgba(255,210,122,0.95)";
-            ctx.fillText(line2, lx, ly + 15);
-          }
+      // Floating labels only over camera; planetarium uses bottom info card
+      if (!isPlanetarium()) {
+        const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
+        const label =
+          obj.label +
+          (obj.alt < 0 ? " ↓" : "") +
+          (obj.rasi ? " · " + obj.rasi : "");
+        const line2 =
+          (badge ? badge + " · " : "") +
+          (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
+        ctx.font = "700 12px -apple-system, system-ui, sans-serif";
+        const tw = Math.max(
+          ctx.measureText(label).width,
+          line2 ? ctx.measureText(line2).width : 0
+        );
+        const lx = px - tw / 2;
+        const ly = py - r - (line2 ? 28 : 14);
+        ctx.globalAlpha = Math.min(1, alpha + 0.2);
+        ctx.fillStyle = "rgba(0,0,0,0.72)";
+        roundRect(ctx, lx - 6, ly - 12, tw + 12, line2 ? 32 : 20, 8);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, lx, ly + 2);
+        if (line2) {
+          ctx.font = "600 10px -apple-system, system-ui, sans-serif";
+          ctx.fillStyle = "rgba(255,210,122,0.95)";
+          ctx.fillText(line2, lx, ly + 15);
         }
       }
 
-      // Target / focus reticle — thin white circle (Sky Map style)
-      if (isTarget || (state.overlays.map && p.angDist < 8 && p.inFov && (isJupiter || isSaturn || isMoon || isIss))) {
+      // Target / focus reticle
+      if (
+        isTarget ||
+        (isPlanetarium() &&
+          p.angDist < 8 &&
+          p.inFov &&
+          (isJupiter || isSaturn || isMoon || isIss))
+      ) {
         ctx.globalAlpha = 1;
         const rr = Math.max(r * 1.35, r + 14);
         ctx.beginPath();
@@ -2606,10 +2708,6 @@
   }
 
   const LAYER_COPY = {
-    map: {
-      title: "Planetarium",
-      hint: "Black sky map",
-    },
     graha: {
       title: "Graha",
       hint: "All nine. Tap one to guide.",
@@ -2630,9 +2728,14 @@
       title: "ISS",
       hint: "Live position",
     },
+    camera: {
+      title: "Camera",
+      hint: "Live rear camera under the sky",
+    },
   };
 
   function objectsForActiveLayer() {
+    if (state.activeLayer === "camera") return [];
     // Constellation list = named patterns + yoga-tārā anchors
     if (state.activeLayer === "stars") {
       if (!S()) return [];
@@ -2740,12 +2843,12 @@
     }
     if (els.findFabLabel) {
       const map = {
-        map: "Map",
         graha: "Graha",
         nakshatra: "Nakṣatra",
         rasi: "Zodiac",
         stars: "Stars",
         iss: "ISS",
+        camera: "Camera",
       };
       els.findFabLabel.textContent = map[state.activeLayer] || "Find";
     }
@@ -2765,15 +2868,39 @@
   function toggleOverlay(layer) {
     if (!(layer in state.overlays)) return;
     state.overlays[layer] = !state.overlays[layer];
-    // Keep at least one overlay on
-    if (!Object.values(state.overlays).some(Boolean)) {
+    // Keep at least one content layer on (not only camera)
+    const contentOn = ["graha", "rasi", "nakshatra", "stars", "iss"].some(
+      (k) => state.overlays[k]
+    );
+    if (!contentOn && !state.overlays.camera) {
       state.overlays[layer] = true;
     }
-    state.activeLayer = layer === "map" ? "graha" : layer;
-    if (layer === "iss") refreshISS(true).catch(() => {});
-    if (layer === "map") applyCameraVisibility();
+    if (layer === "camera") {
+      // Camera is view mode only for Find list
+      if (state.overlays.camera) {
+        ensureCamera()
+          .then(() => {
+            applyCameraVisibility();
+            setStatus("Camera on", "ok");
+          })
+          .catch((err) => {
+            state.overlays.camera = false;
+            applyCameraVisibility();
+            updateLayerChrome();
+            setStatus(err.message || "Camera failed", "warn");
+            savePrefs();
+          });
+      } else {
+        stopCamera();
+        setStatus("Camera off. Black sky.", "ok");
+      }
+    } else {
+      state.activeLayer = layer;
+    }
+    if (layer === "iss" && state.overlays.iss) refreshISS(true).catch(() => {});
     updateLayerChrome();
-    if (state.findOpen) buildObjectList();
+    savePrefs();
+    if (state.findOpen && layer !== "camera") buildObjectList();
   }
 
   function updateDrawerScrim() {
@@ -2989,16 +3116,17 @@
   }
 
   function setActiveLayer(layer) {
-    if (!LAYER_COPY[layer]) return;
+    if (!LAYER_COPY[layer] || layer === "camera") return;
     state.activeLayer = layer;
     // Ensure this overlay is on when focusing Find list
-    state.overlays[layer] = true;
+    if (layer in state.overlays) state.overlays[layer] = true;
     if (state.targetId) {
       const t = state.objects.find((o) => o.id === state.targetId);
       if (!t || t.kind !== layer) state.targetId = null;
     }
     if (layer === "iss") refreshISS(true).catch(() => {});
     updateLayerChrome();
+    savePrefs();
     updateGuide();
     buildObjectList();
     syncGuidingUi();
@@ -3170,10 +3298,18 @@
       }
       if (!ctx) throw new Error("Canvas missing.");
 
-      // Camera still needs to be early for getUserMedia UX
-      setStatus("Camera…", "warn");
-      showGateError("Requesting camera…");
-      await withTimeout(startCamera(), 20000, "Camera");
+      // Camera only if layer is on (default off = black sky map)
+      if (state.overlays.camera) {
+        setStatus("Camera…", "warn");
+        showGateError("Requesting camera…");
+        try {
+          await withTimeout(ensureCamera(), 20000, "Camera");
+        } catch (err) {
+          notes.push("Camera: " + ((err && err.message) || "failed"));
+          state.overlays.camera = false;
+        }
+      }
+      applyCameraVisibility();
 
       // Await motion permissions started in the gesture
       setStatus("Motion…", "warn");
@@ -3198,13 +3334,15 @@
         await getLocationFallback();
       }
 
-      refreshISS(true).catch(() => {});
+      if (state.overlays.iss) refreshISS(true).catch(() => {});
       computeSky();
       buildObjectList();
       state.running = true;
       els.gate.classList.add("hidden");
       document.body.classList.add("running", "clean-ui");
       closeAllDrawers();
+      savePrefs();
+      updateLayerChrome();
 
       setStatus(
         notes.length ? "Live with limits: " + notes.join(", ") : "Live. Pan the sky.",
@@ -3232,8 +3370,11 @@
   }
 
   function init() {
+    loadPrefs();
     loadSavedAlign();
-    applyCameraVisibility(); // planetarium map ON by default (reference look)
+    if (els.onlyAbove) els.onlyAbove.checked = !!state.onlyAbove;
+    if (els.starNames) els.starNames.checked = state.showStarNames !== false;
+    applyCameraVisibility();
     try {
       resizeCanvas();
     } catch (err) {
@@ -3307,17 +3448,16 @@
       card.addEventListener("click", (ev) => {
         const layer = card.getAttribute("data-layer");
         toggleOverlay(layer);
-        // Stay in menu so user can toggle multiple layers; map is view-only
-        if (layer !== "map") state.activeLayer = layer;
-        updateLayerChrome();
       });
     });
     els.onlyAbove?.addEventListener("change", () => {
       state.onlyAbove = !!els.onlyAbove.checked;
+      savePrefs();
       buildObjectList();
     });
     els.starNames?.addEventListener("change", () => {
       state.showStarNames = !!els.starNames.checked;
+      savePrefs();
     });
     els.btnCloseInfo?.addEventListener("click", () => {
       state.targetId = null;

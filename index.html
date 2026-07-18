@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=18" />
+  <link rel="stylesheet" href="styles.css?v=19" />
 </head>
 <body class="clean-ui">
   <div id="app">
@@ -88,16 +88,22 @@
       </div>
       <p class="layer-panel-note">Tap a layer to show or hide.</p>
       <div class="layer-cards">
-        <button type="button" class="layer-card active" data-layer="map" aria-pressed="true">
-          <span class="lc-icon">🌑</span>
-          <span class="lc-name">Planetarium</span>
-          <span class="lc-desc">Black sky map</span>
-          <span class="lc-on">ON</span>
-        </button>
         <button type="button" class="layer-card active" data-layer="graha" aria-pressed="true">
           <span class="lc-icon">☉</span>
           <span class="lc-name">Graha</span>
           <span class="lc-desc">Nine grahas</span>
+          <span class="lc-on">ON</span>
+        </button>
+        <button type="button" class="layer-card active" data-layer="rasi" aria-pressed="true">
+          <span class="lc-icon">♈</span>
+          <span class="lc-name">Zodiac belt</span>
+          <span class="lc-desc">12 rāśis</span>
+          <span class="lc-on">ON</span>
+        </button>
+        <button type="button" class="layer-card active" data-layer="nakshatra" aria-pressed="true">
+          <span class="lc-icon">✦</span>
+          <span class="lc-name">Nakṣatra</span>
+          <span class="lc-desc">27 mansions</span>
           <span class="lc-on">ON</span>
         </button>
         <button type="button" class="layer-card active" data-layer="stars" aria-pressed="true">
@@ -106,22 +112,16 @@
           <span class="lc-desc">Figures and stars</span>
           <span class="lc-on">ON</span>
         </button>
-        <button type="button" class="layer-card" data-layer="rasi" aria-pressed="false">
-          <span class="lc-icon">♈</span>
-          <span class="lc-name">Zodiac belt</span>
-          <span class="lc-desc">12 rāśis</span>
-          <span class="lc-on">OFF</span>
-        </button>
-        <button type="button" class="layer-card" data-layer="nakshatra" aria-pressed="false">
-          <span class="lc-icon">✦</span>
-          <span class="lc-name">Nakṣatra</span>
-          <span class="lc-desc">27 mansions</span>
-          <span class="lc-on">OFF</span>
-        </button>
         <button type="button" class="layer-card" data-layer="iss" aria-pressed="false">
           <span class="lc-icon">🛰</span>
           <span class="lc-name">ISS</span>
           <span class="lc-desc">Space station</span>
+          <span class="lc-on">OFF</span>
+        </button>
+        <button type="button" class="layer-card" data-layer="camera" aria-pressed="false">
+          <span class="lc-icon">📷</span>
+          <span class="lc-name">Camera</span>
+          <span class="lc-desc">Live rear camera</span>
           <span class="lc-on">OFF</span>
         </button>
       </div>
@@ -207,9 +207,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=18"></script>
-  <script src="stars-constellations.js?v=18"></script>
-  <script src="constellation-art.js?v=18"></script>
-  <script src="app.js?v=18"></script>
+  <script src="astro-extras.js?v=19"></script>
+  <script src="stars-constellations.js?v=19"></script>
+  <script src="constellation-art.js?v=19"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
