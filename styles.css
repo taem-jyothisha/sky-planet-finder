@@ -265,6 +265,78 @@ body.planetarium #app {
   border-radius: 0.75rem 0.75rem 0 0;
 }
 
+/* Sky Map–style bottom info card */
+.info-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  padding: 0.85rem 1.1rem calc(0.95rem + var(--safe-b));
+  background: linear-gradient(180deg, rgba(18, 22, 32, 0.82), rgba(8, 10, 16, 0.94));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: auto;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+}
+.info-card.hidden {
+  display: none;
+}
+.info-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.75rem;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(200, 210, 230, 0.75);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.info-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-right: 2rem;
+}
+.info-i {
+  color: #5eb0ff;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.info-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #5eb0ff;
+  text-transform: uppercase;
+}
+.info-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(180, 190, 210, 0.75);
+}
+.info-body {
+  margin: 0.55rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: rgba(230, 235, 245, 0.92);
+  max-width: 36rem;
+}
+body.guiding .map-controls {
+  bottom: calc(8.5rem + var(--safe-b));
+}
+body.guiding .pointing-hud {
+  opacity: 0.35;
+}
+
 .guide-panel {
   position: absolute;
   left: 50%;

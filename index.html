@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
   <title>Sky</title>
-  <link rel="stylesheet" href="styles.css?v=14" />
+  <link rel="stylesheet" href="styles.css?v=15" />
 </head>
 <body>
   <div id="app">
@@ -58,6 +58,17 @@
     <div id="lockedBadge" class="locked-badge hidden">
       <strong id="lockedName">—</strong>
       <span id="lockedDetail"></span>
+    </div>
+
+    <!-- Sky Map–style selection card (bottom) -->
+    <div id="infoCard" class="info-card hidden" role="status" aria-live="polite">
+      <button type="button" id="btnCloseInfo" class="info-close" aria-label="Close">✕</button>
+      <div class="info-title-row">
+        <span class="info-i" aria-hidden="true">ⓘ</span>
+        <h2 id="infoTitle" class="info-title">—</h2>
+      </div>
+      <p id="infoSub" class="info-sub">—</p>
+      <p id="infoBody" class="info-body">—</p>
     </div>
 
     <div id="alignBanner" class="align-banner hidden">
@@ -212,9 +223,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=14"></script>
-  <script src="stars-constellations.js?v=14"></script>
-  <script src="constellation-art.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="astro-extras.js?v=15"></script>
+  <script src="stars-constellations.js?v=15"></script>
+  <script src="constellation-art.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

@@ -51,6 +51,11 @@
     lockedBadge: $("lockedBadge"),
     lockedName: $("lockedName"),
     lockedDetail: $("lockedDetail"),
+    infoCard: $("infoCard"),
+    infoTitle: $("infoTitle"),
+    infoSub: $("infoSub"),
+    infoBody: $("infoBody"),
+    btnCloseInfo: $("btnCloseInfo"),
     alignBanner: $("alignBanner"),
     headingOffset: $("headingOffset"),
     headingOffsetVal: $("headingOffsetVal"),
@@ -860,23 +865,35 @@
     ctx.save();
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, w, h);
-    // Subtle vignette / sky dust (not pure flat void)
-    const g = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.05, w * 0.5, h * 0.5, h * 0.75);
-    g.addColorStop(0, "rgba(20, 28, 48, 0.35)");
-    g.addColorStop(0.55, "rgba(8, 12, 22, 0.15)");
+    // Deep-space blue dust
+    const g = ctx.createRadialGradient(w * 0.5, h * 0.4, h * 0.02, w * 0.5, h * 0.5, h * 0.85);
+    g.addColorStop(0, "rgba(30, 40, 70, 0.4)");
+    g.addColorStop(0.4, "rgba(12, 18, 36, 0.2)");
     g.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
-    // Very faint milky-way band suggestion
+    // Milky Way band (stronger — reference Scorpius / multi-planet shots)
     ctx.save();
-    ctx.translate(w * 0.55, h * 0.4);
-    ctx.rotate(-0.55);
-    const mw = ctx.createLinearGradient(0, -h * 0.15, 0, h * 0.15);
-    mw.addColorStop(0, "rgba(90, 110, 160, 0)");
-    mw.addColorStop(0.5, "rgba(120, 140, 190, 0.06)");
-    mw.addColorStop(1, "rgba(90, 110, 160, 0)");
+    ctx.translate(w * 0.5, h * 0.48);
+    ctx.rotate(-0.65);
+    const mw = ctx.createLinearGradient(0, -h * 0.22, 0, h * 0.22);
+    mw.addColorStop(0, "rgba(100, 120, 180, 0)");
+    mw.addColorStop(0.35, "rgba(140, 150, 200, 0.07)");
+    mw.addColorStop(0.5, "rgba(200, 190, 220, 0.11)");
+    mw.addColorStop(0.65, "rgba(140, 150, 200, 0.07)");
+    mw.addColorStop(1, "rgba(100, 120, 180, 0)");
     ctx.fillStyle = mw;
-    ctx.fillRect(-w, -h * 0.2, w * 2, h * 0.4);
+    ctx.fillRect(-w * 1.2, -h * 0.25, w * 2.4, h * 0.5);
+    // Dust mottling
+    ctx.globalAlpha = 0.04;
+    for (let i = 0; i < 40; i++) {
+      const x = ((i * 97) % 200) / 200 * w * 2 - w;
+      const y = ((i * 53) % 100) / 100 * h * 0.4 - h * 0.2;
+      ctx.beginPath();
+      ctx.arc(x, y, 20 + (i % 7) * 4, 0, Math.PI * 2);
+      ctx.fillStyle = i % 2 ? "#c8d0ff" : "#fff8e8";
+      ctx.fill();
+    }
     ctx.restore();
     ctx.restore();
   }
@@ -1086,6 +1103,7 @@
       ctx.arc(p.x, p.y, r * 3.5, 0, Math.PI * 2);
       ctx.fillStyle = g;
       ctx.fill();
+      if (map && s.mag <= 1.0) drawStarSpike(p.x, p.y, r, s.mag);
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
@@ -1093,6 +1111,7 @@
 
       const showThisName =
         showNames &&
+        !map &&
         p.inFov &&
         (s.mag <= 1.4 || s.nak || key === "Polaris" || key === "Sirius" || key === "Antares");
       if (showThisName) {
@@ -1329,19 +1348,234 @@
     ctx.restore();
   }
 
-  /** Exaggerated planet radius for map mode (reference look) */
+  /** Exaggerated planet radius for map mode (Sky Map reference look) */
   function grahaDrawRadius(obj) {
     const map = !!state.overlays.map;
     const z = Math.max(0.6, Math.min(state.zoom || 1, 4));
-    if (obj.label === "Sūrya") return map ? 22 * Math.sqrt(z) : 16;
-    if (obj.label === "Candra") return map ? 18 * Math.sqrt(z) : 14;
-    if (obj.label === "Śani" || obj.id === "graha:Saturn")
-      return map ? 34 * Math.sqrt(z) : 14;
-    if (obj.label === "Guru" || obj.id === "graha:Jupiter")
-      return map ? 20 * Math.sqrt(z) : 11;
-    if (obj.kind === "iss") return 11;
+    const s = Math.sqrt(z);
+    if (obj.label === "Sūrya") return map ? 26 * s : 16;
+    if (obj.label === "Candra" || obj.id === "graha:Moon") return map ? 38 * s : 16;
+    if (obj.label === "Śani" || obj.id === "graha:Saturn") return map ? 36 * s : 14;
+    if (obj.label === "Guru" || obj.id === "graha:Jupiter") return map ? 40 * s : 14;
+    if (obj.label === "Maṅgala" || obj.id === "graha:Mars") return map ? 16 * s : 10;
+    if (obj.label === "Śukra" || obj.id === "graha:Venus") return map ? 14 * s : 10;
+    if (obj.kind === "iss") return map ? 28 * s : 12;
     if (obj.mag != null && obj.mag < 0) return map ? 14 : 11;
-    return map ? 10 : 8;
+    return map ? 11 : 8;
+  }
+
+  /** Sky Map–style blurbs for info card */
+  const OBJECT_BLURB = {
+    "graha:Sun": "The Sun is the star at the center of our solar system — the source of light and heat for Earth.",
+    "graha:Moon": "The ocean tides on Earth are mostly due to the Moon's gravitational pull.",
+    "graha:Mars": "Mars is the red planet — smaller than Earth, with polar ice and the tallest volcano in the solar system.",
+    "graha:Mercury": "Mercury is the closest planet to the Sun and the fastest in its orbit.",
+    "graha:Jupiter": "Largest planet in the solar system — a gas giant with cloud belts and the Great Red Spot.",
+    "graha:Venus": "Venus is the brightest planet in the sky — Earth's twin in size, wrapped in thick clouds.",
+    "graha:Saturn": "Saturn is famous for its rings — a gas giant that sits far beyond Jupiter.",
+    "graha:Rahu": "Rāhu is the ascending lunar node — not a light, but a shadow point used in jyotiṣa.",
+    "graha:Ketu": "Ketu is the descending lunar node — the southern shadow point opposite Rāhu.",
+    iss: "Operated by expedition crews of astronauts and cosmonauts — the largest artificial body in orbit.",
+    "const:scorpius":
+      "Scorpius is a large constellation near the center of the Milky Way — look for the hook and red Antares (Jyeṣṭhā).",
+    "const:libra":
+      "Libra is the scales of justice — a zodiac constellation between Virgo and Scorpius.",
+    "const:virgo":
+      "Virgo is the maiden — Spica (Citrā) is its brightest star, a key yoga-tārā.",
+    "const:orion":
+      "Orion the hunter is one of the easiest patterns to learn — three belt stars in a row.",
+    "const:leo": "Leo the lion — the sickle and Regulus (Maghā) mark its head and heart.",
+    "const:ursa_major":
+      "Ursa Major holds the Big Dipper — its pointer stars lead the eye to Polaris.",
+  };
+
+  const OBJECT_EN = {
+    "graha:Sun": "SUN",
+    "graha:Moon": "MOON",
+    "graha:Mars": "MARS",
+    "graha:Mercury": "MERCURY",
+    "graha:Jupiter": "JUPITER",
+    "graha:Venus": "VENUS",
+    "graha:Saturn": "SATURN",
+    "graha:Rahu": "RĀHU",
+    "graha:Ketu": "KETU",
+    iss: "INTERNATIONAL SPACE STATION",
+  };
+
+  function objectInfoCopy(obj) {
+    if (!obj) return null;
+    const isConst = obj.id && String(obj.id).indexOf("const:") === 0;
+    const en = OBJECT_EN[obj.id] || (obj.label || "").toUpperCase();
+    const kind =
+      obj.kind === "iss"
+        ? "SPACE STATION"
+        : isConst || obj.kind === "stars"
+          ? "CONSTELLATION"
+          : obj.kind === "star"
+            ? "STAR"
+            : obj.kind === "nakshatra"
+              ? "NAKṢATRA"
+              : obj.kind === "rasi"
+                ? "RĀŚI"
+                : "PLANET";
+    const horiz = obj.alt > 0 ? "ABOVE HORIZON" : "BELOW HORIZON";
+    let sub = kind + ", " + horiz;
+    if (obj.rasi) sub += " · " + obj.rasi;
+    if (obj.nakshatra) sub += " · " + obj.nakshatra;
+    const body =
+      OBJECT_BLURB[obj.id] ||
+      obj.detail ||
+      obj.sub ||
+      "Tap Align if the marker does not match the real sky.";
+    return { title: en, sub, body };
+  }
+
+  function updateInfoCard(obj) {
+    if (!els.infoCard) return;
+    if (!obj) {
+      els.infoCard.classList.add("hidden");
+      return;
+    }
+    const copy = objectInfoCopy(obj);
+    if (els.infoTitle) els.infoTitle.textContent = copy.title;
+    if (els.infoSub) els.infoSub.textContent = copy.sub;
+    if (els.infoBody) els.infoBody.textContent = copy.body;
+    els.infoCard.classList.remove("hidden");
+  }
+
+  function drawJupiterMarker(px, py, r, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const glow = ctx.createRadialGradient(px, py, r * 0.2, px, py, r * 2.2);
+    glow.addColorStop(0, "rgba(255, 210, 140, 0.25)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath();
+    ctx.arc(px, py, r * 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+    // Base disc
+    const g = ctx.createRadialGradient(px - r * 0.3, py - r * 0.35, r * 0.1, px, py, r);
+    g.addColorStop(0, "#f5e0b8");
+    g.addColorStop(0.4, "#d4a86a");
+    g.addColorStop(1, "#8a6230");
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    // Belts
+    const bands = [
+      [-0.45, 0.1, "rgba(180, 100, 50, 0.45)"],
+      [-0.22, 0.12, "rgba(220, 160, 90, 0.35)"],
+      [0.02, 0.16, "rgba(160, 80, 40, 0.5)"],
+      [0.28, 0.11, "rgba(200, 140, 70, 0.4)"],
+      [0.48, 0.08, "rgba(140, 70, 35, 0.45)"],
+    ];
+    for (const [oy, rh, col] of bands) {
+      ctx.beginPath();
+      ctx.ellipse(px, py + r * oy, r * 0.95, r * rh, 0, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+    // Great Red Spot hint
+    ctx.beginPath();
+    ctx.ellipse(px + r * 0.25, py + r * 0.12, r * 0.18, r * 0.1, 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(190, 70, 40, 0.55)";
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMoonMarker(px, py, r, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const glow = ctx.createRadialGradient(px, py, r * 0.3, px, py, r * 2.4);
+    glow.addColorStop(0, "rgba(220, 230, 255, 0.35)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath();
+    ctx.arc(px, py, r * 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+    const g = ctx.createRadialGradient(px - r * 0.35, py - r * 0.4, r * 0.15, px, py, r);
+    g.addColorStop(0, "#f4f6fa");
+    g.addColorStop(0.45, "#c8cdd8");
+    g.addColorStop(1, "#6a7080");
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    // Craters
+    const craters = [
+      [-0.25, -0.2, 0.18],
+      [0.2, 0.1, 0.22],
+      [-0.1, 0.35, 0.12],
+      [0.35, -0.25, 0.1],
+      [0.05, -0.4, 0.08],
+    ];
+    for (const [ox, oy, rr] of craters) {
+      ctx.beginPath();
+      ctx.arc(px + r * ox, py + r * oy, r * rr, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(80, 90, 110, 0.28)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(40, 45, 55, 0.25)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    // Mare patches
+    ctx.beginPath();
+    ctx.ellipse(px - r * 0.15, py + r * 0.05, r * 0.35, r * 0.28, 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(90, 100, 120, 0.22)";
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawIssMarker(px, py, r, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(px, py);
+    const s = r / 28;
+    ctx.scale(s, s);
+    // Solar arrays (blue)
+    ctx.fillStyle = "#3a6cff";
+    ctx.fillRect(-48, -6, 28, 12);
+    ctx.fillRect(-48, 8, 28, 12);
+    ctx.fillRect(20, -6, 28, 12);
+    ctx.fillRect(20, 8, 28, 12);
+    // Boom
+    ctx.strokeStyle = "#c8d0e0";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-50, 0);
+    ctx.lineTo(50, 0);
+    ctx.stroke();
+    // Modules
+    ctx.fillStyle = "#e8eef8";
+    ctx.fillRect(-14, -8, 28, 16);
+    ctx.fillStyle = "#b0b8c8";
+    ctx.fillRect(-8, -14, 10, 8);
+    ctx.fillRect(2, 6, 12, 8);
+    // Crosshair ring around model is drawn by caller
+    ctx.restore();
+  }
+
+  function drawStarSpike(px, py, r, mag) {
+    if (mag > 1.2) return;
+    const len = r * (mag <= 0 ? 4.5 : mag <= 0.5 ? 3.2 : 2.2);
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px - len, py);
+    ctx.lineTo(px + len, py);
+    ctx.moveTo(px, py - len);
+    ctx.lineTo(px, py + len);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.beginPath();
+    ctx.moveTo(px - len * 0.7, py - len * 0.7);
+    ctx.lineTo(px + len * 0.7, py + len * 0.7);
+    ctx.moveTo(px + len * 0.7, py - len * 0.7);
+    ctx.lineTo(px - len * 0.7, py + len * 0.7);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ── Sky catalog ──────────────────────────────────────────────────────
@@ -1775,30 +2009,30 @@
       ctx.globalAlpha = alpha;
 
       const isSaturn = obj.label === "Śani" || obj.id === "graha:Saturn";
+      const isJupiter = obj.label === "Guru" || obj.id === "graha:Jupiter";
+      const isMoon = obj.label === "Candra" || obj.id === "graha:Moon";
+      const isIss = obj.kind === "iss";
+
       if (isSaturn) {
         drawSaturnMarker(px, py, r, obj.color, alpha);
+      } else if (isJupiter) {
+        drawJupiterMarker(px, py, r, alpha);
+      } else if (isMoon) {
+        drawMoonMarker(px, py, r, alpha);
+      } else if (isIss) {
+        drawIssMarker(px, py, r, alpha);
       } else {
         ctx.beginPath();
-        ctx.arc(px, py, r + 12, 0, Math.PI * 2);
-        ctx.fillStyle = (obj.color.length === 7 ? obj.color + "55" : "rgba(255,255,255,0.2)");
+        ctx.arc(px, py, r + 10, 0, Math.PI * 2);
+        ctx.fillStyle = obj.color.length === 7 ? obj.color + "44" : "rgba(255,255,255,0.15)";
         ctx.fill();
         ctx.beginPath();
         ctx.arc(px, py, r, 0, Math.PI * 2);
         ctx.fillStyle = obj.color;
         ctx.fill();
-        ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
-        ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
         ctx.stroke();
-        if (obj.kind === "iss") {
-          ctx.beginPath();
-          ctx.moveTo(px - r - 8, py);
-          ctx.lineTo(px + r + 8, py);
-          ctx.moveTo(px, py - r - 4);
-          ctx.lineTo(px, py + r + 4);
-          ctx.stroke();
-        }
-
-        // Node grahas: ring not filled disc (jyotishi: not a light)
         if (obj.isNode) {
           ctx.beginPath();
           ctx.arc(px, py, r + 4, 0, Math.PI * 2);
@@ -1808,50 +2042,68 @@
         }
       }
 
-      const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
-      const label =
-        obj.label +
-        (obj.alt < 0 ? " ↓" : "") +
-        (obj.rasi ? " · " + obj.rasi : "") +
-        (obj.nakshatra ? " · " + obj.nakshatra : "");
-      const line2 =
-        (obj.pada ? "pāda " + obj.pada + " · " : "") +
-        (badge ? badge + " · " : "") +
-        (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
-      ctx.font = "700 12px -apple-system, system-ui, sans-serif";
-      const tw = Math.max(
-        ctx.measureText(label).width,
-        line2 ? ctx.measureText(line2).width : 0
-      );
-      const lx = px - tw / 2;
-      const ly = py - r - (line2 ? 28 : 14);
-      ctx.globalAlpha = Math.min(1, alpha + 0.2);
-      ctx.fillStyle = "rgba(0,0,0,0.72)";
-      roundRect(ctx, lx - 6, ly - 12, tw + 12, line2 ? 32 : 20, 8);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.fillText(label, lx, ly + 2);
-      if (line2) {
-        ctx.font = "600 10px -apple-system, system-ui, sans-serif";
-        ctx.fillStyle = "rgba(255,210,122,0.95)";
-        ctx.fillText(line2, lx, ly + 15);
+      // Floating labels only in AR / non-map — map uses bottom info card
+      if (!state.overlays.map || (!isTarget && p.angDist > 12)) {
+        if (!state.overlays.map) {
+          const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
+          const label =
+            obj.label +
+            (obj.alt < 0 ? " ↓" : "") +
+            (obj.rasi ? " · " + obj.rasi : "");
+          const line2 =
+            (badge ? badge + " · " : "") +
+            (obj.mag != null ? "m" + obj.mag.toFixed(1) : "");
+          ctx.font = "700 12px -apple-system, system-ui, sans-serif";
+          const tw = Math.max(
+            ctx.measureText(label).width,
+            line2 ? ctx.measureText(line2).width : 0
+          );
+          const lx = px - tw / 2;
+          const ly = py - r - (line2 ? 28 : 14);
+          ctx.globalAlpha = Math.min(1, alpha + 0.2);
+          ctx.fillStyle = "rgba(0,0,0,0.72)";
+          roundRect(ctx, lx - 6, ly - 12, tw + 12, line2 ? 32 : 20, 8);
+          ctx.fill();
+          ctx.fillStyle = "#fff";
+          ctx.fillText(label, lx, ly + 2);
+          if (line2) {
+            ctx.font = "600 10px -apple-system, system-ui, sans-serif";
+            ctx.fillStyle = "rgba(255,210,122,0.95)";
+            ctx.fillText(line2, lx, ly + 15);
+          }
+        }
       }
 
-      // Target reticle — thin white circle like reference around Saturn
-      if (isTarget) {
+      // Target / focus reticle — thin white circle (Sky Map style)
+      if (isTarget || (state.overlays.map && p.angDist < 8 && p.inFov && (isJupiter || isSaturn || isMoon || isIss))) {
         ctx.globalAlpha = 1;
-        const rr = isSaturn ? r * 1.55 : r + 16;
+        const rr = Math.max(r * 1.35, r + 14);
         ctx.beginPath();
         ctx.arc(px, py, rr, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255,0.9)";
-        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = "rgba(255,255,255,0.92)";
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       ctx.restore();
     }
 
     drawRadar(w, h);
-    updateHud(nearestPointlike || nearest);
+    const focus = nearestPointlike || nearest;
+    updateHud(focus);
+    // Info card: selected target, else object under crosshair (map look)
+    if (state.targetId) {
+      const t = state.objects.find((o) => o.id === state.targetId);
+      updateInfoCard(t || null);
+    } else if (
+      focus &&
+      focus.obj &&
+      focus.angDist < lookAtThreshold() &&
+      (focus.obj.kind === "graha" || focus.obj.kind === "iss")
+    ) {
+      updateInfoCard(focus.obj);
+    } else {
+      updateInfoCard(null);
+    }
     updateGuide();
     if (state.findOpen) updateObjectList();
     else updateLayerChrome();
@@ -2344,7 +2596,9 @@
           kind: "stars",
           label: c.label,
           sub: c.hint,
-          detail: "Stick figure landmark · not a Raman rāśi",
+          detail:
+            OBJECT_BLURB["const:" + c.id] ||
+            "White figure art + cyan sticks — landmark for the eye, not a Raman rāśi.",
           color: "#a8c0ff",
           az: az / n,
           alt: alt / n,
@@ -2964,6 +3218,11 @@
     });
     els.starNames?.addEventListener("change", () => {
       state.showStarNames = !!els.starNames.checked;
+    });
+    els.btnCloseInfo?.addEventListener("click", () => {
+      state.targetId = null;
+      updateInfoCard(null);
+      syncGuidingUi();
     });
 
     // Tap app (not canvas — pointer-events none) to re-show FABs while guiding

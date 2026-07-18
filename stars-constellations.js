@@ -91,9 +91,11 @@
     Alpheratz: { ra: 0.1398, dec: 29.0904, mag: 2.1, name: "Alpheratz" },
     // Andromeda
     Mirach: { ra: 1.1622, dec: 35.6206, mag: 2.1, name: "Mirach" },
-    // Libra
+    // Libra (scales — fuller stick figure)
     Zubenelgenubi: { ra: 14.8479, dec: -16.0418, mag: 2.8, name: "Zubenelg." },
     Zubeneschamali: { ra: 15.2835, dec: -9.3829, mag: 2.6, name: "Zubenesch." },
+    Brachium: { ra: 15.0678, dec: -25.2819, mag: 3.3, name: "Brachium" },
+    Zubenelhakrabi: { ra: 15.5921, dec: -14.7895, mag: 3.9, name: "Zubenelh." },
     // Cancer
     AsellusBorealis: { ra: 8.7214, dec: 21.4685, mag: 4.7, name: "Asellus N" },
     AsellusAustralis: { ra: 8.7448, dec: 18.1543, mag: 3.9, name: "Asellus S" },
@@ -165,7 +167,7 @@
     {
       id: "virgo",
       label: "Virgo",
-      hint: "Spica",
+      hint: "Maiden · Spica · Citrā",
       lines: [["Spica", "Arcturus"]],
     },
     {
@@ -267,8 +269,13 @@
     {
       id: "libra",
       label: "Libra",
-      hint: "Scales",
-      lines: [["Zubenelgenubi", "Zubeneschamali"]],
+      hint: "Scales · tulā",
+      lines: [
+        ["Zubeneschamali", "Zubenelhakrabi"],
+        ["Zubenelhakrabi", "Zubenelgenubi"],
+        ["Zubeneschamali", "Zubenelgenubi"],
+        ["Zubenelgenubi", "Brachium"],
+      ],
     },
     {
       id: "capricornus",
