@@ -3,21 +3,27 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+  <!-- iOS / iPadOS -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Raman Sky Guide" />
+  <!-- Android / general PWA -->
   <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#050814" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#050814" />
-  <meta name="description" content="Raman Sky Guide. Find grahas, nakṣatras, and constellations on your phone." />
+  <meta name="color-scheme" content="dark" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="description" content="Raman Sky Guide. Find grahas, nakṣatras, and constellations on phone, tablet, or desktop browser." />
   <meta name="application-name" content="Raman Sky Guide" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=19" />
+  <link rel="stylesheet" href="styles.css?v=20" />
 </head>
 <body class="clean-ui">
   <div id="app">
-    <video id="camera" playsinline webkit-playsinline muted autoplay></video>
+    <video id="camera" playsinline webkit-playsinline muted autoplay disablepictureinpicture></video>
     <canvas id="skyCanvas" aria-hidden="true"></canvas>
 
     <button type="button" id="btnLayers" class="chrome-btn chrome-left" aria-label="Menu" aria-expanded="false" aria-controls="layerPanel">
@@ -196,20 +202,23 @@
         <div class="gate-icon">✦</div>
         <h1 class="gate-title">Raman Sky Guide</h1>
         <p class="gate-copy">
-          Point your phone at the sky. Find grahas, nakṣatras, and constellations.
+          Point your device at the sky. Find grahas, nakṣatras, and constellations.
         </p>
         <button type="button" id="btnGateStart" class="primary-btn wide">Allow &amp; start</button>
         <p id="gateError" class="error" hidden></p>
-        <p class="gate-foot">Works in Safari. Add to Home Screen if you like.</p>
+        <p class="gate-foot">
+          iPhone, iPad, Android, tablets. Use Chrome or Safari over HTTPS.
+          Add to Home Screen for full screen.
+        </p>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=19"></script>
-  <script src="stars-constellations.js?v=19"></script>
-  <script src="constellation-art.js?v=19"></script>
-  <script src="app.js?v=19"></script>
+  <script src="astro-extras.js?v=20"></script>
+  <script src="stars-constellations.js?v=20"></script>
+  <script src="constellation-art.js?v=20"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

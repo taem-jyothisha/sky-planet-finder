@@ -17,19 +17,29 @@
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
+  width: 100%;
   height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 #app {
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
   overflow: hidden;
 }
 
@@ -43,6 +53,8 @@ html, body {
   transform: scale(1);
   transform-origin: center center;
   transition: transform 0.08s linear, opacity 0.25s ease;
+  /* Android/iOS video quirks */
+  object-position: center;
 }
 
 /* Planetarium map mode — hide live camera (black sky under canvas) */
@@ -69,6 +81,8 @@ body.planetarium #app {
   top: calc(0.65rem + var(--safe-t));
   width: 2.75rem;
   height: 2.75rem;
+  min-width: 44px;
+  min-height: 44px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.35);
@@ -78,6 +92,7 @@ body.planetarium #app {
   justify-content: center;
   cursor: pointer;
   pointer-events: auto;
+  touch-action: manipulation;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   transition: background 0.15s ease, opacity 0.2s ease;
@@ -525,6 +540,8 @@ body.guiding .chrome-btn {
   transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding-bottom: calc(1.5rem + var(--safe-b));
   display: flex;
   flex-direction: column;
@@ -639,7 +656,7 @@ body.guiding .chrome-btn {
   right: 0;
   bottom: 0;
   z-index: 31;
-  max-height: 38vh;
+  max-height: min(48vh, 28rem);
   padding: 0.35rem 0.75rem calc(0.75rem + var(--safe-b));
   background: rgba(12, 16, 32, 0.96);
   backdrop-filter: blur(16px);
@@ -649,6 +666,9 @@ body.guiding .chrome-btn {
   box-shadow: 0 -8px 30px rgba(0,0,0,0.4);
   display: flex;
   flex-direction: column;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   gap: 0.35rem;
   transition: transform 0.28s ease, opacity 0.28s ease;
 }
@@ -1090,8 +1110,30 @@ body.guiding .settings-float { opacity: 0.35; }
   line-height: 1.4 !important;
 }
 
-/* Floating planet labels drawn via canvas; CSS only for a11y fallback */
+/* Tablets / landscape / desktop browsers */
 @media (min-width: 720px) {
-  .object-grid { max-height: 28vh; }
-  .find-panel { max-height: 36vh; }
+  .object-grid { max-height: 32vh; }
+  .find-panel { max-height: min(42vh, 22rem); }
+  .map-panel.drawer-left { width: min(24rem, 40vw); }
+  .chrome-btn {
+    width: 3rem;
+    height: 3rem;
+  }
+}
+@media (min-width: 1024px) and (orientation: landscape) {
+  .find-panel {
+    left: auto;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(22rem, 32vw);
+    max-height: none;
+    border-radius: 1.1rem 0 0 1.1rem;
+    border-top: none;
+    border-left: 1px solid var(--line);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chrome-btn.spinning .recal-icon { animation: none; }
+  .map-panel.drawer-left { transition: none; }
 }

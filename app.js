@@ -1,13 +1,37 @@
 /**
  * Raman Sky Guide — grahas, nakṣatras, rāśis, constellations
- * Raman ayanāṃśa only · planetarium + AR · iPhone-tuned
+ * Raman ayanāṃśa · phones, tablets, desktop browsers (iOS + Android + more)
  */
 (() => {
   "use strict";
 
   const X = () => window.SkyExtras;
-  // iPhone main (~24mm) horizontal FOV ≈ 60–65° on full uncropped frame at 1×
+  // Typical phone wide FOV at 1× (tuned per device via video aspect later)
   const BASE_H_FOV_1X = 60;
+
+  /** Runtime platform (phones, tablets, desktop browsers) */
+  const PLATFORM = (function detectPlatform() {
+    const ua = navigator.userAgent || "";
+    const iPadOS =
+      /iPad/.test(ua) ||
+      (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+    const iOS = iPadOS || /iPhone|iPod/.test(ua);
+    const android = /Android/i.test(ua);
+    const tablet =
+      iPadOS ||
+      (/Android/i.test(ua) && !/Mobile/i.test(ua)) ||
+      /Tablet|Silk/i.test(ua);
+    const mobile = iOS || android || /Mobile/i.test(ua) || (navigator.maxTouchPoints || 0) > 1;
+    return {
+      iOS,
+      android,
+      tablet,
+      mobile,
+      desktop: !mobile,
+      secure: !!window.isSecureContext,
+      touch: (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window,
+    };
+  })();
 
   const $ = (id) => document.getElementById(id);
 
@@ -386,8 +410,13 @@
   }
 
   function onOrientation(e) {
-    // Prefer a single stream: absolute events win when flagged
-    if (e && e.absolute === false && state._preferAbsolute) return;
+    // Prefer absolute when recent; still accept relative if absolute goes quiet
+    // (Android sometimes only sends one stream; iOS often sends both.)
+    if (e && e.absolute === false && state._preferAbsolute) {
+      if (state._lastAbsoluteTs && performance.now() - state._lastAbsoluteTs < 1500) {
+        return;
+      }
+    }
 
     updateScreenAngle();
     state._gotOrientEvent = true;
@@ -397,6 +426,7 @@
       typeof e.gamma === "number" && !Number.isNaN(e.gamma) ? e.gamma : null;
     const alpha =
       typeof e.alpha === "number" && !Number.isNaN(e.alpha) ? e.alpha : null;
+    // iOS Safari compass; Android usually has absolute alpha instead
     const compass =
       typeof e.webkitCompassHeading === "number" &&
       !Number.isNaN(e.webkitCompassHeading)
@@ -405,7 +435,10 @@
     if (typeof e.webkitCompassAccuracy === "number") {
       state._lastCompassAccuracy = e.webkitCompassAccuracy;
     }
-    if (e.absolute === true) state._preferAbsolute = true;
+    if (e.absolute === true) {
+      state._preferAbsolute = true;
+      state._lastAbsoluteTs = performance.now();
+    }
 
     if (beta == null && gamma == null && compass == null && alpha == null) return;
 
@@ -417,19 +450,27 @@
     if (compass != null) state._lastCompass = compass;
     if (gamma != null) state.roll = gamma;
 
-    // LIVE yaw/pitch from matrix when alpha exists (relative or absolute).
-    // Absolute north via slow northBias from compass — not per-frame mix.
+    // LIVE yaw/pitch from device matrix when alpha exists.
+    // Absolute events (common on Android) are Earth-referenced.
+    // iOS webkitCompassHeading still used for slow north bias when present.
     if (alpha != null) {
       const aim = rearCameraAzAlt(alpha, b, g, state.screenAngle);
       if (compass != null && Math.abs(aim.alt) < 65) {
         maybeUpdateNorthBias(aim.az, compass);
+      } else if (e.absolute === true) {
+        // Absolute alpha: trust as north-referenced (no webkit compass on Android)
+        state.northBias = state.northBias || 0;
       }
-      applyAim(aim.az, aim.alt, compass != null ? "matrix" : "matrix");
+      applyAim(
+        aim.az,
+        aim.alt,
+        e.absolute ? "abs-matrix" : compass != null ? "matrix+compass" : "matrix"
+      );
       return;
     }
 
     if (compass != null) {
-      // iOS often omits useful alpha: use compass for yaw + tilt for pitch
+      // iOS: compass for yaw, tilt for pitch
       const aim = rearCameraAzAlt(state._lastAlpha || 0, b, g, state.screenAngle);
       applyAim(compassToLookAz(compass), aim.alt, "compass+tilt");
       return;
@@ -511,7 +552,7 @@
 
     const opts = { passive: true };
     window.addEventListener("deviceorientation", onOrientation, opts);
-    // Only use absolute if it actually fires with absolute:true (handler checks)
+    // Android Chrome often exposes absolute heading here
     window.addEventListener("deviceorientationabsolute", onOrientation, opts);
     window.addEventListener(
       "devicemotion",
@@ -523,10 +564,27 @@
     );
     window.addEventListener("orientationchange", updateScreenAngle);
     if (screen.orientation) {
-      screen.orientation.addEventListener("change", updateScreenAngle);
+      try {
+        screen.orientation.addEventListener("change", updateScreenAngle);
+      } catch (_) {}
     }
+    // Android browser chrome show/hide
+    window.visualViewport?.addEventListener("resize", () => {
+      resizeCanvas();
+      updateScreenAngle();
+    });
 
     scheduleSensorHealthCheck();
+  }
+
+  function sensorHelpText() {
+    if (PLATFORM.iOS) {
+      return "No sensors. Settings → Safari (or app) → Motion & Orientation, then tap ◎";
+    }
+    if (PLATFORM.android) {
+      return "No sensors. Allow motion/orientation if asked. Use HTTPS. Then tap ◎";
+    }
+    return "No orientation sensors. Use a phone or tablet, or Align manually.";
   }
 
   function scheduleSensorHealthCheck() {
@@ -534,9 +592,9 @@
       if (!state.running) return;
       const moved = performance.now() - (state.lastAimMoveTs || 0) < 3000;
       if ((state.orientEventCount || 0) < 2 && (state.motionEventCount || 0) < 2) {
-        setStatus("No sensors. Turn on Motion in Safari Settings, then tap ◎", "warn");
+        setStatus(sensorHelpText(), "warn");
       } else if (!moved && !state.orientReady) {
-        setStatus("Wave the phone in a figure-8", "warn");
+        setStatus("Wave the device in a figure-8", "warn");
       } else if (state.orientReady) {
         setStatus("Sensors live", "ok");
       }
@@ -544,8 +602,7 @@
   }
 
   /**
-   * Recalibrate iPhone inputs: re-ask motion permission, reset compass bias,
-   * soft-reset aim smoothing, refresh GPS. Then user should figure‑8 + Align.
+   * Recalibrate motion, compass, GPS. Works on iOS, Android, tablets.
    * Must be invoked from a user gesture (tap).
    */
   async function recalibrateSensors() {
@@ -585,10 +642,15 @@
     }
 
     try {
-      // Re-request sensors inside this tap (iOS)
+      // Re-request sensors inside this tap (required on iOS; no-op elsewhere)
       await beginSensorPermissionsInGesture();
     } catch (err) {
-      setStatus("Allow Motion in Safari Settings", "warn");
+      setStatus(
+        PLATFORM.iOS
+          ? "Allow Motion in Safari Settings"
+          : "Allow motion/orientation permission",
+        "warn"
+      );
     }
 
     // Ensure listeners are running
@@ -613,7 +675,7 @@
     state.starCacheAt = 0;
     state.fieldCacheAt = 0;
 
-    setStatus("Wave phone in a figure-8, then Align on the Moon", "ok");
+    setStatus("Wave device in a figure-8, then Align on the Moon", "ok");
     els.alignBanner?.classList.remove("hidden");
     if (btn) {
       btn.classList.remove("spinning");
@@ -746,12 +808,12 @@
 
   async function startCamera() {
     if (!window.isSecureContext) {
-      throw new Error("Need HTTPS for camera on iPhone.");
+      throw new Error("Need HTTPS for camera (open the github.io link).");
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Camera API not available.");
+      throw new Error("Camera API not available in this browser.");
     }
-    // Stop previous stream so Restart works on iOS
+    // Stop previous stream so Restart works (iOS + Android)
     if (state.stream) {
       try {
         state.stream.getTracks().forEach((t) => t.stop());
@@ -760,17 +822,20 @@
       state.videoTrack = null;
       if (els.camera) els.camera.srcObject = null;
     }
+    // Cascade: rear camera preferred; fall back for tablets / desktops / picky browsers
     const tries = [
       {
         audio: false,
         video: {
-          facingMode: { exact: "environment" },
+          facingMode: { ideal: "environment" },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
       },
-      { audio: false, video: { facingMode: { ideal: "environment" } } },
+      { audio: false, video: { facingMode: { exact: "environment" } } },
       { audio: false, video: { facingMode: "environment" } },
+      { audio: false, video: { facingMode: { ideal: "user" } } },
+      { audio: false, video: true },
     ];
     let lastErr = null;
     for (const c of tries) {
@@ -778,10 +843,17 @@
         const stream = await navigator.mediaDevices.getUserMedia(c);
         state.stream = stream;
         state.videoTrack = stream.getVideoTracks()[0] || null;
+        if (!els.camera) throw new Error("Video element missing.");
         els.camera.setAttribute("playsinline", "");
         els.camera.setAttribute("webkit-playsinline", "");
+        els.camera.setAttribute("muted", "");
         els.camera.muted = true;
+        els.camera.playsInline = true;
         els.camera.srcObject = stream;
+        // Some Android WebViews need load() before play()
+        try {
+          els.camera.load();
+        } catch (_) {}
         await els.camera.play().catch(() => {});
         setupZoomFromTrack();
         return;
@@ -789,7 +861,9 @@
         lastErr = err;
       }
     }
-    throw new Error(lastErr?.message || "Camera denied.");
+    throw new Error(
+      (lastErr && (lastErr.message || String(lastErr))) || "Camera denied."
+    );
   }
 
   function setupZoomFromTrack() {
@@ -850,19 +924,17 @@
     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   }
   function onTouchStart(ev) {
-    if (ev.touches.length === 2) {
-      pinchStartDist = touchDist(ev.touches[0], ev.touches[1]);
-      pinchStartZoom = state.zoom;
-    }
+    if (!ev.touches || ev.touches.length < 2) return;
+    pinchStartDist = touchDist(ev.touches[0], ev.touches[1]);
+    pinchStartZoom = state.zoom;
   }
   function onTouchMove(ev) {
-    if (ev.touches.length === 2 && pinchStartDist) {
-      ev.preventDefault();
-      applyZoom(pinchStartZoom * (touchDist(ev.touches[0], ev.touches[1]) / pinchStartDist));
-    }
+    if (!ev.touches || ev.touches.length < 2 || !pinchStartDist) return;
+    ev.preventDefault();
+    applyZoom(pinchStartZoom * (touchDist(ev.touches[0], ev.touches[1]) / pinchStartDist));
   }
   function onTouchEnd(ev) {
-    if (ev.touches.length < 2) pinchStartDist = null;
+    if (!ev.touches || ev.touches.length < 2) pinchStartDist = null;
   }
 
   // ── Fixed stars / constellations ─────────────────────────────────────
@@ -968,7 +1040,7 @@
   /** Start or resume rear camera. Call from a user gesture when possible. */
   async function ensureCamera() {
     if (!window.isSecureContext) {
-      throw new Error("Need HTTPS for camera on iPhone.");
+      throw new Error("Need HTTPS for camera (open the github.io link).");
     }
     const live =
       state.videoTrack &&
@@ -3288,7 +3360,7 @@
 
     try {
       if (!window.isSecureContext) {
-        throw new Error("Need HTTPS (open the github.io link in Safari).");
+        throw new Error("Need HTTPS. Open the github.io link in Chrome or Safari.");
       }
       if (typeof Astronomy === "undefined") {
         throw new Error("Astronomy library failed to load. Check network, reload.");
@@ -3355,7 +3427,9 @@
       const msg = err && err.message ? err.message : String(err);
       if (els.gate) els.gate.classList.remove("hidden");
       showGateError(
-        msg + "\n\nIn Safari, allow Camera, Location, and Motion. Turn Precise Location on. Reload."
+        msg +
+          "\n\nAllow Camera (if used), Location, and Motion/Orientation. " +
+          "Use Chrome or Safari over HTTPS. Precise location helps. Reload if stuck."
       );
       setStatus("Start failed", "warn");
       state.running = false;
@@ -3385,15 +3459,26 @@
       resizeCanvas();
       updateScreenAngle();
     });
+    window.visualViewport?.addEventListener("resize", () => {
+      resizeCanvas();
+    });
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => {
+        updateScreenAngle();
+        resizeCanvas();
+      }, 200);
+    });
 
     const app = document.getElementById("app");
     if (app) {
+      // Pinch zoom (touch). Safe on iOS, Android, iPad.
       app.addEventListener("touchstart", onTouchStart, { passive: true });
       app.addEventListener("touchmove", onTouchMove, { passive: false });
       app.addEventListener("touchend", onTouchEnd, { passive: true });
+      app.addEventListener("touchcancel", onTouchEnd, { passive: true });
     }
 
-    // Prefer pointerup/click — more reliable on iOS than touch-only paths
+    // click works on all browsers after user gesture
     const bindStart = (el) => {
       if (!el) return;
       el.addEventListener("click", (e) => {
@@ -3412,8 +3497,13 @@
     } else if (!X()) {
       showGateError("Sky extras not loaded. Hard-refresh the page.");
     } else if (!S() || !Art()) {
-      showGateError("Star/art catalogs not loaded. Hard-refresh (?v=14).");
+      showGateError("Star/art catalogs not loaded. Hard-refresh the page.");
     }
+    try {
+      document.body.classList.toggle("plat-ios", PLATFORM.iOS);
+      document.body.classList.toggle("plat-android", PLATFORM.android);
+      document.body.classList.toggle("plat-tablet", PLATFORM.tablet);
+    } catch (_) {}
     const clearTarget = () => {
       state.targetId = null;
       updateGuide();

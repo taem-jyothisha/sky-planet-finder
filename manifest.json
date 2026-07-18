@@ -1,18 +1,28 @@
 {
   "name": "Raman Sky Guide",
   "short_name": "Raman Sky",
-  "description": "Find grahas, nakṣatras, and constellations on your phone.",
+  "description": "Find grahas, nakṣatras, and constellations on phone, tablet, or desktop.",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui", "browser"],
   "background_color": "#000000",
   "theme_color": "#050814",
   "orientation": "any",
+  "lang": "en",
+  "categories": ["education", "utilities"],
   "icons": [
     {
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
