@@ -39,11 +39,22 @@
     Spica: { ra: 13.4199, dec: -11.1613, mag: 1.0, name: "Spica", nak: "Citrā" },
     // Bootes
     Arcturus: { ra: 14.2610, dec: 19.1824, mag: -0.1, name: "Arcturus" },
-    // Scorpius
-    Antares: { ra: 16.4901, dec: -26.4319, mag: 1.1, name: "Antares", nak: "Jyeṣṭhā" },
-    Shaula: { ra: 17.5601, dec: -37.1038, mag: 1.6, name: "Shaula" },
-    Sargas: { ra: 17.6219, dec: -42.9978, mag: 1.9, name: "Sargas" },
+    // Scorpius — full hook (head → claws → body → stinger)
+    Graffias: { ra: 16.0901, dec: -19.8055, mag: 2.6, name: "Graffias" },
     Dschubba: { ra: 16.0056, dec: -22.6217, mag: 2.3, name: "Dschubba" },
+    PiSco: { ra: 15.9810, dec: -26.1141, mag: 2.9, name: "π Sco" },
+    Alniyat: { ra: 16.3531, dec: -25.5928, mag: 2.9, name: "Alniyat" },
+    Antares: { ra: 16.4901, dec: -26.4319, mag: 1.1, name: "Antares", nak: "Jyeṣṭhā" },
+    TauSco: { ra: 16.5980, dec: -28.2160, mag: 2.8, name: "τ Sco" },
+    EpsilonSco: { ra: 16.8360, dec: -34.2932, mag: 2.3, name: "Larawag" },
+    MuSco: { ra: 16.8640, dec: -38.0474, mag: 3.0, name: "μ Sco" },
+    ZetaSco: { ra: 16.9022, dec: -42.3620, mag: 3.6, name: "ζ Sco" },
+    EtaSco: { ra: 17.2020, dec: -43.2392, mag: 3.3, name: "η Sco" },
+    Sargas: { ra: 17.6219, dec: -42.9978, mag: 1.9, name: "Sargas" },
+    IotaSco: { ra: 17.7933, dec: -40.1269, mag: 3.0, name: "ι Sco" },
+    KappaSco: { ra: 17.7080, dec: -39.0297, mag: 2.4, name: "κ Sco" },
+    Shaula: { ra: 17.5601, dec: -37.1038, mag: 1.6, name: "Shaula" },
+    Lesath: { ra: 17.5606, dec: -37.2958, mag: 2.7, name: "Lesath" },
     // Sagittarius teapot
     KausAustralis: { ra: 18.4029, dec: -34.3843, mag: 1.8, name: "Kaus Austr." },
     Nunki: { ra: 18.9211, dec: -26.2967, mag: 2.0, name: "Nunki" },
@@ -160,11 +171,26 @@
     {
       id: "scorpius",
       label: "Scorpius",
-      hint: "Hook · Antares",
+      hint: "Hook · Antares · Jyeṣṭhā",
       lines: [
-        ["Dschubba", "Antares"],
-        ["Antares", "Shaula"],
-        ["Shaula", "Sargas"],
+        // claws / head
+        ["Graffias", "Dschubba"],
+        ["Dschubba", "PiSco"],
+        ["Graffias", "PiSco"],
+        // body through heart
+        ["Dschubba", "Alniyat"],
+        ["Alniyat", "Antares"],
+        ["Antares", "TauSco"],
+        // long tail hook → stinger
+        ["TauSco", "EpsilonSco"],
+        ["EpsilonSco", "MuSco"],
+        ["MuSco", "ZetaSco"],
+        ["ZetaSco", "EtaSco"],
+        ["EtaSco", "Sargas"],
+        ["Sargas", "IotaSco"],
+        ["IotaSco", "KappaSco"],
+        ["KappaSco", "Shaula"],
+        ["Shaula", "Lesath"],
       ],
     },
     {

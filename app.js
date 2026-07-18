@@ -830,6 +830,7 @@
 
   /**
    * Draw constellation stick figures + bright star dots.
+   * Style target: Sky Guide / reference — cyan lines, glowing white dots.
    * These are LANDMARKS for the eye — not Raman rāśi boundaries.
    */
   function drawConstellations(w, h) {
@@ -839,7 +840,7 @@
     const cache = state.starCache || {};
     const showNames = state.showStarNames !== false;
 
-    // Lines first (under dots)
+    // Lines first (under dots) — cyan glow like reference
     ctx.save();
     for (const c of S().CONSTELLATIONS) {
       let anyIn = false;
@@ -859,15 +860,22 @@
       }
       if (!segs.length) continue;
 
-      ctx.strokeStyle = anyIn
-        ? "rgba(180, 210, 255, 0.55)"
-        : "rgba(140, 160, 200, 0.25)";
-      ctx.lineWidth = 1.4;
+      // Soft outer glow, then crisp cyan stroke
+      const lineAlpha = anyIn ? 0.85 : 0.35;
       ctx.lineJoin = "round";
+      ctx.lineCap = "round";
       for (const [pa, pb] of segs) {
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
         ctx.lineTo(pb.x, pb.y);
+        ctx.strokeStyle = "rgba(80, 170, 255, " + (lineAlpha * 0.35) + ")";
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.strokeStyle = "rgba(90, 185, 255, " + lineAlpha + ")";
+        ctx.lineWidth = 1.8;
         ctx.stroke();
       }
 
@@ -892,18 +900,18 @@
         ctx.fillStyle = "rgba(0,0,0,0.55)";
         roundRect(ctx, cx - tw / 2 - 6, cy - 22, tw + 12, 18, 6);
         ctx.fill();
-        ctx.fillStyle = "rgba(200, 220, 255, 0.95)";
+        ctx.fillStyle = "rgba(160, 220, 255, 0.98)";
         ctx.fillText(lab, cx - tw / 2, cy - 9);
         if (c.hint && pts.length >= 3) {
           ctx.font = "600 9px -apple-system, system-ui, sans-serif";
           const hw = ctx.measureText(c.hint).width;
-          ctx.fillStyle = "rgba(160, 180, 220, 0.75)";
+          ctx.fillStyle = "rgba(140, 190, 240, 0.8)";
           ctx.fillText(c.hint, cx - hw / 2, cy - 24);
         }
       }
     }
 
-    // Star dots
+    // Star dots — bright white cores with soft bloom (reference style)
     for (const key of Object.keys(cache)) {
       const s = cache[key];
       if (s.alt < -3) continue;
@@ -911,21 +919,32 @@
       if (!p || (!p.inFov && p.angDist > 35)) continue;
 
       const r =
-        s.mag <= 0 ? 4.5 : s.mag <= 1 ? 3.5 : s.mag <= 2 ? 2.6 : s.mag <= 3 ? 2 : 1.4;
+        s.mag <= 0 ? 4.8 : s.mag <= 1 ? 3.8 : s.mag <= 2 ? 2.8 : s.mag <= 3 ? 2.1 : 1.5;
 
+      // Bloom
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
+      g.addColorStop(0, "rgba(255,255,255,0.55)");
+      g.addColorStop(0.35, "rgba(200,230,255,0.22)");
+      g.addColorStop(1, "rgba(120,180,255,0)");
       ctx.beginPath();
-      ctx.arc(p.x, p.y, r + 2, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.arc(p.x, p.y, r * 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = g;
       ctx.fill();
+      // Core
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = s.color;
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      // Tiny cool rim
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.55, 0, Math.PI * 2);
+      ctx.fillStyle = s.mag <= 1.2 ? "#ffffff" : "rgba(220, 235, 255, 0.95)";
       ctx.fill();
 
       const showThisName =
         showNames &&
         p.inFov &&
-        (s.mag <= 1.6 || s.nak || key === "Polaris" || key === "Sirius");
+        (s.mag <= 1.6 || s.nak || key === "Polaris" || key === "Sirius" || key === "Antares");
       if (showThisName) {
         const text = s.nak ? s.label + " · " + s.nak : s.label;
         ctx.font = "600 10px -apple-system, system-ui, sans-serif";
@@ -933,10 +952,179 @@
         ctx.fillStyle = "rgba(0,0,0,0.5)";
         roundRect(ctx, p.x + r + 3, p.y - 7, tw + 6, 14, 4);
         ctx.fill();
-        ctx.fillStyle = "rgba(230, 235, 255, 0.9)";
+        ctx.fillStyle = "rgba(230, 240, 255, 0.95)";
         ctx.fillText(text, p.x + r + 6, p.y + 3);
       }
     }
+    ctx.restore();
+  }
+
+  /**
+   * Red ecliptic spine (reference style) — always when stars or rāśi on.
+   * Distinct from the multi-color rāśi band fill.
+   */
+  function drawEclipticSpine(w, h) {
+    if (state.heading == null || state.pitch == null || !X() || state.lat == null) return;
+    if (typeof Astronomy === "undefined") return;
+    // Tropical ecliptic path in horizon coords (true sky path of Sun)
+    // Use sidereal samples via Raman → tropical for jyotiṣī continuity
+    const Ex = X();
+    const observer = new Astronomy.Observer(state.lat, state.lon, state.elevM || 0);
+    const time = Astronomy.MakeTime(new Date());
+
+    const pts = [];
+    for (let sid = 0; sid <= 360; sid += 1.5) {
+      const p = projectSiderealEcliptic(sid, 0, Ex, time, observer);
+      if (p && (p.inFov || p.angDist < 28)) pts.push(p);
+      else if (pts.length) {
+        strokeEclipticSegment(pts);
+        pts.length = 0;
+      }
+    }
+    if (pts.length >= 2) strokeEclipticSegment(pts);
+  }
+
+  function strokeEclipticSegment(pts) {
+    if (pts.length < 2) return;
+    ctx.save();
+    // Soft red glow underlay
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = "rgba(255, 40, 55, 0.35)";
+    ctx.lineWidth = 5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
+    // Crisp red spine
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = "rgba(255, 45, 60, 0.92)";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Floating compass badges (N / NE / E / SE …) in FOV — like reference SE pill.
+   */
+  function drawCompassBadges(w, h) {
+    if (state.heading == null || state.pitch == null) return;
+    const dirs = [
+      { az: 0, lab: "N" },
+      { az: 45, lab: "NE" },
+      { az: 90, lab: "E" },
+      { az: 135, lab: "SE" },
+      { az: 180, lab: "S" },
+      { az: 225, lab: "SW" },
+      { az: 270, lab: "W" },
+      { az: 315, lab: "NW" },
+    ];
+    // Place slightly above geometric horizon so they sit near the ecliptic band
+    const alts = [6, 14];
+    ctx.save();
+    for (const d of dirs) {
+      let best = null;
+      for (const alt of alts) {
+        const p = project({ az: d.az, alt });
+        if (p && p.inFov && (!best || p.angDist < best.angDist)) best = p;
+      }
+      if (!best) continue;
+      // Prefer badges not dead-center (avoid clutter on aim crosshair)
+      if (best.angDist < 8) continue;
+      drawDirBadge(best.x, best.y, d.lab);
+    }
+    ctx.restore();
+  }
+
+  function drawDirBadge(x, y, lab) {
+    const padX = lab.length > 1 ? 10 : 8;
+    const padY = 5;
+    ctx.font = "700 11px -apple-system, system-ui, sans-serif";
+    const tw = ctx.measureText(lab).width;
+    const bw = tw + padX * 2;
+    const bh = 16 + padY;
+    const bx = x - bw / 2;
+    const by = y - bh / 2;
+    // Rounded hex-ish pill (reference SE badge)
+    ctx.beginPath();
+    const r = 5;
+    roundRect(ctx, bx, by, bw, bh, r);
+    ctx.fillStyle = "rgba(12, 14, 20, 0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(230, 235, 245, 0.88)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    // Inner hairline
+    roundRect(ctx, bx + 1.5, by + 1.5, bw - 3, bh - 3, r - 1);
+    ctx.strokeStyle = "rgba(180, 190, 210, 0.35)";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(245, 248, 255, 0.95)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(lab, x, y + 0.5);
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  /** Saturn (Śani): disc + tilted ring ellipse — reference planet look */
+  function drawSaturnMarker(px, py, r, color, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(px, py, r + 10, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(232, 208, 144, 0.22)";
+    ctx.fill();
+    // Rings (behind / through body)
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-0.35);
+    ctx.scale(1, 0.32);
+    for (const [rr, lw, col] of [
+      [r + 14, 3.2, "rgba(210, 190, 140, 0.55)"],
+      [r + 11, 2.4, "rgba(245, 225, 170, 0.9)"],
+      [r + 8, 1.6, "rgba(180, 160, 110, 0.75)"],
+    ]) {
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+    ctx.restore();
+    // Body
+    const g = ctx.createRadialGradient(px - r * 0.3, py - r * 0.35, r * 0.1, px, py, r);
+    g.addColorStop(0, "#f5e6b8");
+    g.addColorStop(0.55, color || "#e8d090");
+    g.addColorStop(1, "#a89050");
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    // Equatorial band
+    ctx.beginPath();
+    ctx.ellipse(px, py + r * 0.1, r * 0.85, r * 0.18, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(160, 130, 70, 0.25)";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255,255,255,0.75)";
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Near-side ring arc over body
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-0.35);
+    ctx.scale(1, 0.32);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 11, 0.15, Math.PI - 0.15);
+    ctx.strokeStyle = "rgba(245, 225, 170, 0.95)";
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.restore();
     ctx.restore();
   }
 
@@ -1260,9 +1448,17 @@
     // ── Fixed stars & stick figures first (landmarks for the eye) ──
     if (state.overlays.stars) drawConstellations(w, h);
 
+    // ── Red ecliptic spine (reference style) under belts / grahas ──
+    if (state.overlays.stars || state.overlays.rasi || state.overlays.nakshatra) {
+      drawEclipticSpine(w, h);
+    }
+
     // ── Sky belts (zodiac + nakṣatra) under graha markers ──
     if (state.overlays.rasi) drawZodiacBelt(w, h);
     if (state.overlays.nakshatra) drawNakshatraBelt(w, h);
+
+    // ── Floating N/NE/E/SE… badges (reference SE pill) ──
+    drawCompassBadges(w, h);
 
     let nearest = null;
     let nearestPointlike = null;
@@ -1350,39 +1546,45 @@
       if (obj.kind === "iss") r = 11;
       else if (obj.label === "Sūrya") r = 16;
       else if (obj.label === "Candra") r = 14;
+      else if (obj.label === "Śani" || obj.id === "graha:Saturn") r = 13;
       else if (obj.mag != null && obj.mag < 0) r = 11;
 
       const alpha = p.inFov ? 1 : isTarget ? 0.9 : obj.alt < 0 ? 0.45 : 0.55;
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      ctx.beginPath();
-      ctx.arc(px, py, r + 12, 0, Math.PI * 2);
-      ctx.fillStyle = (obj.color.length === 7 ? obj.color + "55" : "rgba(255,255,255,0.2)");
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fillStyle = obj.color;
-      ctx.fill();
-      ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
-      ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.95)";
-      ctx.stroke();
-      if (obj.kind === "iss") {
+      const isSaturn = obj.label === "Śani" || obj.id === "graha:Saturn";
+      if (isSaturn) {
+        drawSaturnMarker(px, py, r, obj.color, alpha);
+      } else {
         ctx.beginPath();
-        ctx.moveTo(px - r - 8, py);
-        ctx.lineTo(px + r + 8, py);
-        ctx.moveTo(px, py - r - 4);
-        ctx.lineTo(px, py + r + 4);
+        ctx.arc(px, py, r + 12, 0, Math.PI * 2);
+        ctx.fillStyle = (obj.color.length === 7 ? obj.color + "55" : "rgba(255,255,255,0.2)");
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fillStyle = obj.color;
+        ctx.fill();
+        ctx.lineWidth = obj.kind === "iss" ? 2.5 : 2;
+        ctx.strokeStyle = obj.kind === "iss" ? "#6dffa8" : "rgba(255,255,255,0.95)";
         ctx.stroke();
-      }
+        if (obj.kind === "iss") {
+          ctx.beginPath();
+          ctx.moveTo(px - r - 8, py);
+          ctx.lineTo(px + r + 8, py);
+          ctx.moveTo(px, py - r - 4);
+          ctx.lineTo(px, py + r + 4);
+          ctx.stroke();
+        }
 
-      // Node grahas: ring not filled disc (jyotishi: not a light)
-      if (obj.isNode) {
-        ctx.beginPath();
-        ctx.arc(px, py, r + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = obj.color;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
+        // Node grahas: ring not filled disc (jyotishi: not a light)
+        if (obj.isNode) {
+          ctx.beginPath();
+          ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+          ctx.strokeStyle = obj.color;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
       }
 
       const badge = obj.skyRole && obj.skyRole.badge ? obj.skyRole.badge : "";
@@ -1414,14 +1616,20 @@
         ctx.fillText(line2, lx, ly + 15);
       }
 
+      // Target reticle — solid white ring like reference (not dashed gold)
       if (isTarget) {
+        ctx.globalAlpha = 1;
+        const rr = isSaturn ? r + 22 : r + 16;
         ctx.beginPath();
-        ctx.arc(px, py, r + 18, 0, Math.PI * 2);
-        ctx.strokeStyle = "#ffd27a";
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([5, 4]);
+        ctx.arc(px, py, rr, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 1.6;
         ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(px, py, rr + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.35)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -1500,23 +1708,7 @@
       }
     }
 
-    // Ecliptic spine
-    ctx.beginPath();
-    let started = false;
-    for (let sid = 0; sid <= 360; sid += 2) {
-      const p = projectSiderealEcliptic(sid, 0, Ex, time, observer);
-      if (!p || !p.inFov) {
-        started = false;
-        continue;
-      }
-      if (!started) {
-        ctx.moveTo(p.x, p.y);
-        started = true;
-      } else ctx.lineTo(p.x, p.y);
-    }
-    ctx.strokeStyle = "rgba(255, 210, 122, 0.75)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    // Spine drawn separately as red ecliptic (drawEclipticSpine) — avoid double gold line
     ctx.restore();
   }
 
