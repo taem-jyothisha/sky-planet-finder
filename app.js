@@ -729,7 +729,7 @@
             altitude: null,
           },
         });
-        setStatus("Approx location (IP) · enable Precise GPS for accuracy", "warn");
+        setStatus("Rough location. Turn on Precise GPS.", "warn");
         return true;
       }
     } catch (_) {}
@@ -738,7 +738,7 @@
     state.lon = state.lon ?? 78;
     state.accM = 99999;
     setLocChip();
-    setStatus("No GPS · set Precise Location in Settings", "warn");
+    setStatus("No GPS. Set Precise Location in Settings.", "warn");
     return false;
   }
 
@@ -1972,7 +1972,7 @@
       ctx.fillStyle = "#ffd27a";
       ctx.font = "700 14px -apple-system, system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("Waiting for motion sensors… pan after Allow", w / 2, h * 0.42 + 30);
+      ctx.fillText("Waiting for motion… pan the phone", w / 2, h * 0.42 + 30);
       ctx.textAlign = "start";
     }
 
@@ -2428,8 +2428,8 @@
       if (els.pointingMain) els.pointingMain.textContent = "Aim phone at sky";
       if (els.pointingSub)
         els.pointingSub.textContent = state.orientReady
-          ? "Wave phone in a figure‑8 · then Align on Candra"
-          : "Allow Motion · then pan";
+          ? "Wave phone in a figure-8, then Align"
+          : "Allow Motion, then pan";
       return;
     }
     const thr = lookAtThreshold();
@@ -2540,11 +2540,10 @@
       if (els.lockedName) els.lockedName.textContent = "Aligned · " + target.label;
       if (els.lockedDetail)
         els.lockedDetail.textContent =
-          "Within " +
           p.angDist.toFixed(1) +
-          "° of crosshair · " +
+          "° off · elev " +
           target.alt.toFixed(0) +
-          "° elev · tap Align if still off real sky";
+          "°. Align if still wrong.";
       els.alignBanner?.classList.remove("hidden");
       return;
     }
@@ -2897,7 +2896,7 @@
     if (!bright.length) {
       const tip = document.createElement("span");
       tip.className = "tonight-chip";
-      tip.textContent = "No bright graha up · check belt / later";
+      tip.textContent = "No bright graha up right now";
       tip.style.borderStyle = "dashed";
       els.tonightStrip.appendChild(tip);
       return;
