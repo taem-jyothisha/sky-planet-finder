@@ -62,45 +62,66 @@ body.planetarium #app {
   pointer-events: none;
 }
 
-.top-bar {
+/* Clean fullscreen — corner icons only until drawers open */
+.chrome-btn {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 20;
+  z-index: 24;
+  top: calc(0.65rem + var(--safe-t));
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: #f0f4ff;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: calc(0.75rem + var(--safe-t)) 1rem 0.5rem;
-  background: linear-gradient(180deg, rgba(0,0,0,0.65), transparent);
-  pointer-events: none;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.15s ease, opacity 0.2s ease;
 }
-.chips {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
-  max-width: 70vw;
-}
-.zoom-bar {
+.chrome-btn:active { background: rgba(40, 60, 100, 0.55); }
+.chrome-left { left: 0.75rem; }
+.chrome-right { right: 0.75rem; }
+.chrome-glyph { font-size: 1.25rem; line-height: 1; font-weight: 600; }
+
+.brand-watermark {
   position: absolute;
   left: 50%;
-  top: calc(3.4rem + var(--safe-t));
+  top: calc(0.9rem + var(--safe-t));
   transform: translateX(-50%);
-  z-index: 22;
+  z-index: 12;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.5);
-  border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  max-width: 96vw;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(200, 215, 240, 0.45);
+  pointer-events: none;
+  transition: opacity 1s ease;
+}
+.brand-watermark .logo {
+  color: rgba(255, 210, 122, 0.55);
+  font-size: 0.85rem;
+}
+body.running .brand-watermark { opacity: 0; }
+
+body.clean-ui .clean-hide,
+body.clean-ui .pointing-hud { display: none !important; }
+body.clean-ui .crosshair { opacity: 0.22; }
+
+.drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  background: rgba(0, 0, 0, 0.45);
   pointer-events: auto;
 }
+.drawer-scrim.hidden { display: none; }
+
 .zoom-btn {
   border: 0;
   background: transparent;
@@ -117,18 +138,45 @@ body.planetarium #app {
   background: rgba(126, 182, 255, 0.25);
   color: #fff;
 }
-.zoom-bar input[type="range"] {
-  width: 5.5rem;
+.zoom-drawer input[type="range"] {
+  width: 100%;
   accent-color: var(--accent);
 }
 .zoom-val {
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--accent-2);
-  min-width: 4.5rem;
+  min-width: 2.5rem;
   white-space: nowrap;
 }
-/* Layer tabs live in the bottom sheet */
+.zoom-bar-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+.zoom-drawer-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.drawer-tools {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+}
+
 .head-actions { display: flex; gap: 0.35rem; align-items: center; }
 .debug-line {
   margin: 0;
@@ -141,14 +189,6 @@ body.planetarium #app {
   text-overflow: ellipsis;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  font-size: 1rem;
-}
 .logo { color: var(--accent-2); }
 
 .chip {
@@ -330,11 +370,8 @@ body.planetarium #app {
   color: rgba(230, 235, 245, 0.92);
   max-width: 36rem;
 }
-body.guiding .map-controls {
-  bottom: calc(8.5rem + var(--safe-b));
-}
-body.guiding .pointing-hud {
-  opacity: 0.35;
+body.guiding .chrome-btn {
+  opacity: 0.85;
 }
 
 .guide-panel {
@@ -448,86 +485,60 @@ body.guiding .pointing-hud {
   margin-top: 0.05rem;
 }
 
-/* ── Google Maps–style controls ───────────────────────── */
-.map-controls {
-  position: absolute;
-  left: 0.7rem;
-  bottom: calc(1rem + var(--safe-b));
-  z-index: 26;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.map-controls.faded {
-  opacity: 0;
-  transform: translateY(12px);
-  pointer-events: none;
-}
-body.guiding .map-controls:not(.force-show) {
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(10px);
-}
-body.guiding .map-controls.force-show {
-  opacity: 1;
-  pointer-events: auto;
-  transform: none;
-}
-
-.fab {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.96);
-  color: #1a1a1a;
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 700;
-  padding: 0.55rem 0.85rem;
-  border-radius: 999px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.28);
-  cursor: pointer;
-  min-width: 6.5rem;
-}
-.fab.ghost {
-  background: rgba(20, 28, 48, 0.88);
-  color: #f0f4ff;
-  border-color: rgba(255,255,255,0.14);
-}
-.fab-icon { font-size: 0.95rem; line-height: 1; }
-.fab-text { letter-spacing: 0.01em; }
-
+/* Left drawer (menu / layers) — dark theme for planetarium */
 .map-panel {
   position: absolute;
-  left: 0.7rem;
-  bottom: calc(5.2rem + var(--safe-b));
-  z-index: 28;
-  width: min(17.5rem, calc(100vw - 1.4rem));
-  padding: 0.75rem;
-  border-radius: 1rem;
-  background: #fff;
-  color: #1a1a1a;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  z-index: 30;
+  padding: 0.9rem 0.85rem;
+  background: rgba(12, 16, 28, 0.97);
+  color: #f0f4ff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
 }
-.map-panel.hidden { display: none; }
+.map-panel.drawer-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: min(22rem, 88vw);
+  max-height: none;
+  border-radius: 0 1.1rem 1.1rem 0;
+  transform: translateX(-105%);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(1.5rem + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+}
+.map-panel.drawer-left.hidden {
+  display: flex;
+  transform: translateX(-105%);
+  pointer-events: none;
+  visibility: hidden;
+}
+.map-panel.drawer-left:not(.hidden) {
+  transform: translateX(0);
+  visibility: visible;
+}
 .map-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.55rem;
   font-size: 0.92rem;
+  color: #f0f4ff;
 }
 .icon-x {
   border: 0;
-  background: #f0f0f0;
+  background: rgba(255, 255, 255, 0.1);
   width: 1.7rem;
   height: 1.7rem;
   border-radius: 999px;
   font-size: 0.8rem;
   cursor: pointer;
-  color: #333;
+  color: #e8eefc;
 }
 .layer-cards {
   display: grid;
@@ -535,25 +546,23 @@ body.guiding .map-controls.force-show {
   gap: 0.4rem;
 }
 .layer-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.1rem;
   padding: 0.55rem 0.5rem;
   border-radius: 0.75rem;
-  border: 2px solid #e8e8e8;
-  background: #fafafa;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  color: #222;
-}
-.layer-card {
-  position: relative;
+  color: #eef2ff;
 }
 .layer-card.active {
-  border-color: #1a73e8;
-  background: #e8f0fe;
+  border-color: rgba(94, 176, 255, 0.65);
+  background: rgba(94, 176, 255, 0.12);
 }
 .layer-card .lc-on {
   position: absolute;
@@ -562,27 +571,49 @@ body.guiding .map-controls.force-show {
   font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: #888;
+  color: rgba(180, 190, 210, 0.55);
 }
 .layer-card.active .lc-on {
-  color: #1a73e8;
+  color: #5eb0ff;
 }
 .lc-icon { font-size: 1.1rem; }
 .lc-name { font-size: 0.82rem; font-weight: 750; }
-.lc-desc { font-size: 0.62rem; color: #666; line-height: 1.25; }
+.lc-desc { font-size: 0.62rem; color: rgba(180, 190, 210, 0.7); line-height: 1.25; }
 .layer-panel-note {
   margin: 0 0 0.5rem;
   font-size: 0.7rem;
-  color: #666;
+  color: rgba(180, 190, 210, 0.7);
   line-height: 1.35;
 }
 .panel-check {
-  margin-top: 0.55rem;
+  margin-top: 0.15rem;
   font-size: 0.75rem;
-  color: #444;
+  color: rgba(200, 210, 230, 0.85);
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+.drawer-tools .calib {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.drawer-tools .calib input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.drawer-tools .text-btn {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.25rem 0;
 }
 
 .find-panel {
@@ -590,7 +621,7 @@ body.guiding .map-controls.force-show {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 27;
+  z-index: 31;
   max-height: 38vh;
   padding: 0.35rem 0.75rem calc(0.75rem + var(--safe-b));
   background: rgba(12, 16, 32, 0.96);
@@ -974,27 +1005,51 @@ body.guiding .settings-float { opacity: 0.35; }
   justify-content: center;
   padding: 1.25rem;
   background:
-    radial-gradient(ellipse at 50% 20%, rgba(90, 120, 200, 0.25), transparent 55%),
-    radial-gradient(ellipse at 70% 80%, rgba(255, 180, 80, 0.12), transparent 45%),
-    var(--bg);
+    radial-gradient(ellipse at 50% 18%, rgba(90, 120, 200, 0.28), transparent 55%),
+    radial-gradient(ellipse at 70% 85%, rgba(255, 180, 80, 0.1), transparent 45%),
+    #000;
 }
 .gate.hidden { display: none; }
 .gate-card {
   width: min(22rem, 100%);
-  background: rgba(12, 18, 36, 0.92);
+  background: rgba(12, 18, 36, 0.94);
   border: 1px solid var(--line);
   border-radius: 1.25rem;
-  padding: 1.35rem 1.25rem 1.2rem;
+  padding: 1.5rem 1.3rem 1.25rem;
   box-shadow: var(--shadow);
+  text-align: center;
 }
 .gate-icon {
-  font-size: 2rem;
+  font-size: 2.1rem;
   line-height: 1;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.45rem;
+  color: var(--accent-2);
 }
-.gate-card h2 {
-  margin: 0 0 0.45rem;
-  font-size: 1.35rem;
+.gate-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #f4f7ff;
+}
+.gate-tag {
+  margin: 0 0 0.75rem !important;
+  font-size: 0.78rem !important;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent) !important;
+}
+.gate-copy {
+  margin: 0 0 1.1rem !important;
+  color: var(--muted) !important;
+  font-size: 0.9rem !important;
+  line-height: 1.45 !important;
+}
+.gate-foot {
+  margin: 0.85rem 0 0 !important;
+  font-size: 0.7rem !important;
+  color: rgba(160, 175, 200, 0.65) !important;
 }
 .gate-card p {
   margin: 0 0 0.85rem;

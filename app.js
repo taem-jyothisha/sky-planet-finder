@@ -1,6 +1,6 @@
 /**
- * Sky — AR finder: grahas, nakṣatras, rāśis, ISS
- * iPhone-tuned · high-accuracy GPS · zoom · calibrate
+ * Raman Sky Guide — grahas, nakṣatras, rāśis, constellations
+ * Raman ayanāṃśa only · planetarium + AR · iPhone-tuned
  */
 (() => {
   "use strict";
@@ -30,6 +30,8 @@
     mapControls: $("mapControls"),
     layerPanel: $("layerPanel"),
     findPanel: $("findPanel"),
+    drawerScrim: $("drawerScrim"),
+    brandWatermark: $("brandWatermark"),
     guideDock: $("guideDock"),
     dockTarget: $("dockTarget"),
     dockHint: $("dockHint"),
@@ -2248,6 +2250,8 @@
   }
 
   function drawRadar(w, h) {
+    // Clean fullscreen: no corner radar chrome
+    if (document.body.classList.contains("clean-ui")) return;
     const cx = w - 58;
     const cy = 108;
     const R = 44;
@@ -2672,6 +2676,8 @@
       };
       els.findFabLabel.textContent = map[state.activeLayer] || "Find";
     }
+    // Title bar for public brand (if present)
+    if (document.title !== "Raman Sky Guide") document.title = "Raman Sky Guide";
 
     els.layerCards?.forEach((card) => {
       const layer = card.getAttribute("data-layer");
@@ -2697,11 +2703,22 @@
     if (state.findOpen) buildObjectList();
   }
 
+  function updateDrawerScrim() {
+    const any = state.layersOpen || state.findOpen;
+    els.drawerScrim?.classList.toggle("hidden", !any);
+    els.drawerScrim?.setAttribute("aria-hidden", any ? "false" : "true");
+  }
+
   function setLayersOpen(open) {
     state.layersOpen = !!open;
     els.layerPanel?.classList.toggle("hidden", !open);
     els.btnLayers?.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) setFindOpen(false);
+    if (open) {
+      state.findOpen = false;
+      els.findPanel?.classList.add("hidden");
+      els.btnFind?.setAttribute("aria-expanded", "false");
+    }
+    updateDrawerScrim();
   }
 
   function setFindOpen(open) {
@@ -2709,19 +2726,27 @@
     els.findPanel?.classList.toggle("hidden", !open);
     els.btnFind?.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) {
-      setLayersOpen(false);
+      state.layersOpen = false;
+      els.layerPanel?.classList.add("hidden");
+      els.btnLayers?.setAttribute("aria-expanded", "false");
       buildObjectList();
     }
+    updateDrawerScrim();
   }
 
-  /** When a target is selected, collapse panels (Maps-style clean view) */
+  function closeAllDrawers() {
+    setLayersOpen(false);
+    setFindOpen(false);
+  }
+
+  /** When a target is selected, collapse panels — keep sky fullscreen */
   function syncGuidingUi() {
     const guiding = !!state.targetId && state.running;
     document.body.classList.toggle("guiding", guiding);
     if (guiding) {
-      setLayersOpen(false);
-      setFindOpen(false);
-      els.guideDock?.classList.remove("hidden");
+      closeAllDrawers();
+      // Dock optional — keep clean; info card carries the focus
+      els.guideDock?.classList.add("hidden");
       els.pointingHud?.classList.add("dim");
       const t = state.objects.find((o) => o.id === state.targetId);
       if (els.dockTarget) els.dockTarget.textContent = t ? t.label : "Target";
@@ -3105,15 +3130,16 @@
       buildObjectList();
       state.running = true;
       els.gate.classList.add("hidden");
+      document.body.classList.add("running", "clean-ui");
+      closeAllDrawers();
 
-      // Do NOT invent heading/pitch — project() returns null until sensors live
+      // Fullscreen sky — drawers only open when user taps ☰ or ⌕
       setStatus(
         notes.length
           ? "Live (partial) · " + notes.join(" · ") + " · pan phone"
-          : "Live · pan phone · open Layers",
+          : "Live · pan the sky · tap ☰ or ⌕",
         notes.length ? "warn" : "ok"
       );
-      setFindOpen(true);
       syncGuidingUi();
       requestAnimationFrame(tick);
     } catch (err) {
@@ -3204,12 +3230,9 @@
       card.addEventListener("click", (ev) => {
         const layer = card.getAttribute("data-layer");
         toggleOverlay(layer);
-        setLayersOpen(false);
-        // Map is a view mode only — no Find list
-        if (layer === "map") return;
-        state.activeLayer = layer;
-        setFindOpen(true);
-        buildObjectList();
+        // Stay in menu so user can toggle multiple layers; map is view-only
+        if (layer !== "map") state.activeLayer = layer;
+        updateLayerChrome();
       });
     });
     els.onlyAbove?.addEventListener("change", () => {
@@ -3224,14 +3247,14 @@
       updateInfoCard(null);
       syncGuidingUi();
     });
-
-    // Tap app (not canvas — pointer-events none) to re-show FABs while guiding
+    els.drawerScrim?.addEventListener("click", () => closeAllDrawers());
+    // Escape / back-feel: close drawers on empty sky tap when open
     document.getElementById("app")?.addEventListener("click", (ev) => {
-      if (!state.targetId) return;
-      if (ev.target && ev.target.closest && ev.target.closest("button, a, input, .map-panel, .find-panel"))
-        return;
-      els.mapControls?.classList.add("force-show");
-      setTimeout(() => els.mapControls?.classList.remove("force-show"), 2500);
+      if (!state.layersOpen && !state.findOpen) return;
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      if (t.closest(".map-panel, .find-panel, .chrome-btn, .info-card, .gate")) return;
+      closeAllDrawers();
     });
 
     window.visualViewport?.addEventListener("resize", () => {
@@ -3264,7 +3287,7 @@
       btn.addEventListener("click", () => applyZoom(Number(btn.getAttribute("data-zoom"))));
     });
 
-    setStatus("Tap Start · grahas · nakṣatras · rāśis · ISS", "muted");
+    setStatus("Raman Sky Guide · Allow & start", "muted");
   }
 
   if (document.readyState === "loading") {

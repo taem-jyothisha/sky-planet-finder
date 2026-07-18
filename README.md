@@ -1,78 +1,64 @@
-# Sky — camera planet finder
+# Raman Sky Guide
 
-Simple web app: point your phone at the sky, see which planet you’re looking at, and follow on-screen arrows to a planet you pick.
+Point your phone at the night sky. Identify **grahas**, **nakṣatras**, **rāśis**, and constellations.
 
-**Ayanāṃśa: Raman only** (Swiss Ephemeris `SIDM_RAMAN`). Lahiri and all other ayanāṃśas are banned.
+**Ayanāṃśa: Raman only** (Swiss Ephemeris `SIDM_RAMAN`). Other ayanāṃśas are not used.
 
-## Live on iPhone (free HTTPS)
+## Live
 
-**https://taem-jyothisha.github.io/sky-planet-finder/**
+**https://taem-jyothisha.github.io/sky-planet-finder/?v=16**
 
-Open in **Safari** → Allow & start → Share → Add to Home Screen (optional).
+Open in **Safari** (iPhone) → **Allow & start** → optional: Share → **Add to Home Screen**.
 
 Repo: https://github.com/taem-jyothisha/sky-planet-finder
 
+## How it feels
+
+1. **Clean fullscreen** sky after start (no clutter).
+2. Tap **☰** (top left) → layers, zoom, align, compass trim.
+3. Tap **⌕** (top right) → find grahas / constellations / ISS.
+4. Tap a target → guide + bottom info card.
+5. **Planetarium** mode = black sky map; turn it off for camera AR.
+
 ## Features
 
-1. **Live camera** (rear) with sky overlay  
-2. **In-screen labels** for Sun, Moon, and planets in your view  
-3. **“Looking toward”** HUD — names the body near the crosshair  
-4. **Find mode** — tap a planet; arrows guide turn left/right and tilt up/down  
-5. **Compass trim** slider if your phone compass is a bit off  
+- Planetarium map with constellation figure art + cyan sticks  
+- All 9 grahas (Raman rāśi / nakṣatra / pāda)  
+- Zodiac & nakṣatra belts (optional layers)  
+- Large planet markers (Jupiter, Saturn, Moon, …)  
+- ISS live position  
+- Align on Moon/Venus when compass drifts  
 
-## Run on iPhone (recommended)
+## iPhone setup
 
-iPhone Safari **requires HTTPS** for camera + compass. Plain `http://192.168…` will fail.
+1. Open the **https** link in **Safari**.
+2. Tap **Allow & start** → Camera, Location, Motion.
+3. Optional: **Add to Home Screen** for fullscreen.
+4. Outdoors, pan slowly. Use **Align** once if labels drift.
 
-### Option A — PC + HTTPS tunnel (easiest while developing)
-
-On your computer:
-
-```powershell
-cd C:\Users\supra\OneDrive\Codex\sky-app
-py -3 -m http.server 8766
-# other terminal:
-npx --yes localtunnel --port 8766
-```
-
-Open the `https://….loca.lt` URL **in Safari** on the iPhone.  
-If you see a “tunnel password” / continue page, tap through once.
-
-### Option B — Same Wi‑Fi only (may block camera)
-
-`http://192.168.x.x:8766` — often **blocked** by iOS for camera. Prefer Option A.
-
-### On the iPhone
-
-1. Open the **https** link in **Safari** (not Chrome in-app browsers if possible).
-2. Tap **Allow & start**.
-3. Allow **Camera**, **Location**, **Motion**.
-4. Optional: Share → **Add to Home Screen** → open as full-screen app.
-5. Outdoors, hold phone upright, pick a planet, follow the arrow.
-
-### If something is denied
-
-**Settings → Safari** (or Settings → Sky if added to Home Screen) → enable Camera, Location, Motion & Orientation.
-
-### Best results
-
-- Use a **phone**, outdoors, clear sky  
-- Hold phone **upright** like a camera viewfinder  
-- Grant **camera**, **location**, and **motion/compass**  
-- If labels seem rotated, nudge **Compass trim**
+**Settings → Safari** (or the home-screen app) → enable Camera, Location, Motion & Orientation. Prefer **Precise Location**.
 
 ## How it works
 
 | Piece | Source |
 |--------|--------|
-| Planet positions (alt/az) | [astronomy-engine](https://github.com/cosinekitty/astronomy) |
-| Where you’re pointing | Device orientation (compass heading + pitch) |
-| Labels & arrows | Canvas overlay on the camera video |
+| Planet / star positions | [astronomy-engine](https://github.com/cosinekitty/astronomy) |
+| Aim | Device orientation (compass + pitch) |
+| Sidereal measure | Raman ayanāṃśa only (`astro-extras.js`) |
+| Overlays | Canvas on camera or black planetarium |
 
-Accuracy is good for **finding** planets; it is not a professional theodolite. Compass error is the usual weak point on phones.
+Accuracy is for **recognition and learning**, not a survey instrument. Compass error is the usual limit on phones.
 
 ## Files
 
-- `index.html` — page shell  
-- `styles.css` — UI  
-- `app.js` — camera, sensors, sky math, guides  
+- `index.html` — shell, gate, drawers  
+- `styles.css` — clean fullscreen UI  
+- `app.js` — sensors, projection, draw loop  
+- `astro-extras.js` — Raman, grahas, belts  
+- `stars-constellations.js` — stick figures  
+- `constellation-art.js` — white figure art  
+- `manifest.json` — PWA “Raman Sky Guide”  
+
+## License / sharing
+
+Built for public sharing by the Raman Sky Guide project. Keep Raman-only ayanāṃśa if you fork.

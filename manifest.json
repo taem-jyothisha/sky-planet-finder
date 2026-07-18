@@ -1,10 +1,10 @@
 {
-  "name": "Sky · Find planets",
-  "short_name": "Sky",
-  "description": "Point your phone at the sky to identify and find planets.",
+  "name": "Raman Sky Guide",
+  "short_name": "Raman Sky",
+  "description": "Night sky guide for grahas, nakṣatras, rāśis and constellations — Raman ayanāṃśa only.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#050814",
+  "background_color": "#000000",
   "theme_color": "#050814",
   "orientation": "any",
   "icons": [
