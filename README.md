@@ -6,7 +6,7 @@ Uses **Raman** ayanāṃśa only.
 
 ## Live
 
-https://taem-jyothisha.github.io/sky-planet-finder/?v=25
+https://taem-jyothisha.github.io/sky-planet-finder/?v=26
 
 Works on **any modern browser** (phone, tablet, computer):
 

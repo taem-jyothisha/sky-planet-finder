@@ -19,7 +19,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <title>Raman Sky Guide</title>
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=26" />
 </head>
 <body class="clean-ui">
   <div id="app">
@@ -62,6 +62,14 @@
       <span class="dot"></span>
     </div>
     <button type="button" id="zoomChip" class="zoom-chip hidden" aria-label="Reset zoom to 1x">1×</button>
+    <button type="button" id="matchBtn" class="match-btn hidden" aria-label="Match overlay to real sky">Match Moon</button>
+    <div id="nudgePad" class="nudge-pad hidden" aria-label="Fine adjust overlay">
+      <button type="button" data-nudge="0,0.4" aria-label="Nudge up">▲</button>
+      <button type="button" data-nudge="-0.4,0" aria-label="Nudge left">◀</button>
+      <button type="button" data-nudge="0,0" class="nudge-align" aria-label="Align">⊕</button>
+      <button type="button" data-nudge="0.4,0" aria-label="Nudge right">▶</button>
+      <button type="button" data-nudge="0,-0.4" aria-label="Nudge down">▼</button>
+    </div>
 
     <div id="edgeLeft" class="edge-cue edge-left" aria-hidden="true">◀</div>
     <div id="edgeRight" class="edge-cue edge-right" aria-hidden="true">▶</div>
@@ -90,8 +98,8 @@
     </div>
 
     <div id="alignBanner" class="align-banner hidden">
-      <p>Hold steady. Object in the + . Align.</p>
-      <button type="button" id="btnAlignQuick" class="primary-btn">Align</button>
+      <p>Put the <strong>real</strong> Moon under the + , then Match.</p>
+      <button type="button" id="btnAlignQuick" class="primary-btn">Match</button>
     </div>
 
     <div id="pointingHud" class="pointing-hud clean-hide">
@@ -150,7 +158,7 @@
       </div>
 
       <div class="drawer-tools">
-        <button type="button" id="btnCalibrate" class="primary-btn wide">Align on target</button>
+        <button type="button" id="btnCalibrate" class="primary-btn wide">Match camera (Moon on +)</button>
         <button type="button" id="btnRecalibrateMenu" class="text-btn">Recalibrate sensors</button>
         <label class="check-tool panel-check">
           <input type="checkbox" id="onlyAbove" />
@@ -173,14 +181,20 @@
         </div>
         <label class="calib">
           Compass trim
-          <input type="range" id="headingOffset" min="-60" max="60" value="0" />
+          <input type="range" id="headingOffset" min="-180" max="180" value="0" />
           <span id="headingOffsetVal">0°</span>
         </label>
         <label class="calib">
           Elev trim
-          <input type="range" id="pitchOffset" min="-40" max="40" value="0" />
+          <input type="range" id="pitchOffset" min="-60" max="60" value="0" />
           <span id="pitchOffsetVal">0°</span>
         </label>
+        <label class="calib">
+          Camera FOV fit
+          <input type="range" id="fovScale" min="80" max="125" value="100" />
+          <span id="fovScaleVal">1.00×</span>
+        </label>
+        <p class="calib-hint">If Moon is on the + but marker sits beside it, Match. If size/gap feels wrong, FOV fit.</p>
         <button type="button" id="btnStart" class="text-btn">Restart sensors</button>
         <p id="debugLine" class="debug-line">—</p>
       </div>
@@ -234,9 +248,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
   <meta http-equiv="Permissions-Policy" content="accelerometer=(self), gyroscope=(self), magnetometer=(self), camera=(self), geolocation=(self)" />
-  <script src="astro-extras.js?v=25"></script>
-  <script src="stars-constellations.js?v=25"></script>
-  <script src="constellation-art.js?v=25"></script>
-  <script src="app.js?v=25"></script>
+  <script src="astro-extras.js?v=26"></script>
+  <script src="stars-constellations.js?v=26"></script>
+  <script src="constellation-art.js?v=26"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>

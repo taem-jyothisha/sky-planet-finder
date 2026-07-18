@@ -7,7 +7,12 @@
 
   const X = () => window.SkyExtras;
   // Typical phone wide FOV at 1× (tuned per device via video aspect later)
-  const BASE_H_FOV_1X = 60;
+  /**
+   * Vertical FOV (degrees) of a typical phone rear camera at 1× after object-fit:cover.
+   * Horizontal is derived from screen aspect — more accurate than guessing video-buffer crop.
+   * Tunable via state.fovScale (Align / Match camera).
+   */
+  const BASE_V_FOV_1X = 56;
   /** Soft cap for digital zoom — beyond this, shake ruins spotting */
   const DIG_ZOOM_MAX = 4;
   const ZOOM_STEPS = [1, 1.5, 2, 3, 4];
@@ -98,6 +103,10 @@
     zoomBtns: document.querySelectorAll("[data-zoom]"),
     zoomSlider: $("zoomSlider"),
     zoomChip: $("zoomChip"),
+    matchBtn: $("matchBtn"),
+    fovScale: $("fovScale"),
+    fovScaleVal: $("fovScaleVal"),
+    nudgePad: $("nudgePad"),
     debugLine: $("debugLine"),
     layerCards: document.querySelectorAll(".layer-card[data-layer]"),
     listTitle: $("listTitle"),
@@ -133,6 +142,11 @@
     hardwareZoom: false,
     zoomTarget: 1,
     steady: false,
+    /** Multiplier on optical FOV (1 = default). Fine-tunes camera↔overlay scale. */
+    fovScale: 1,
+    /** Pixel shift of optical center (rare; most phones 0). */
+    centerOffsetX: 0,
+    centerOffsetY: 0,
     targetId: null,
     /** @type {Array<object>} */
     objects: [],
@@ -267,48 +281,31 @@
   }
 
   /**
-   * Effective FOV after object-fit:cover + zoom.
-   * Clamp base FOV at 1×, THEN divide by zoom (old code floored after /z
-   * so 2×–8× never narrowed projection — zoom broke identify).
+   * Effective FOV after zoom.
+   * Screen-aspect optical model (not fragile video-buffer crop guesses):
+   * cover fills the screen, so world FOV matches the visible screen rectangle.
    */
   function viewFov() {
     const z = Math.max(0.5, state.zoom || 1);
-    const vid = els.camera;
-    let vw = (vid && vid.videoWidth) || 1920;
-    let vh = (vid && vid.videoHeight) || 1080;
     const { w: sw, h: sh } = cssSize();
     const screenAspect = sw / Math.max(1, sh);
+    const scale = Math.max(0.75, Math.min(1.35, state.fovScale || 1));
 
-    // Landscape buffer on portrait UI (or reverse): swap so cover math matches screen
-    let videoAspect = vw / Math.max(1, vh);
-    if (
-      (screenAspect < 1 && videoAspect > 1.15) ||
-      (screenAspect > 1.15 && videoAspect < 1)
-    ) {
-      const t = vw;
-      vw = vh;
-      vh = t;
-      videoAspect = vw / Math.max(1, vh);
-    }
+    // Vertical FOV at 1× (phone rear cam ≈ 50–62° of world after cover)
+    let baseV = BASE_V_FOV_1X * scale;
+    // Slightly wider when live camera is on (photo FOV vs planetarium map)
+    if (state.overlays && state.overlays.camera) baseV *= 1.04;
+    baseV = Math.max(42, Math.min(72, baseV));
 
-    // 1× optical FOV on wider axis, then aspect for height
-    const fullW1 = BASE_H_FOV_1X;
-    const fullH1 =
-      ((2 * Math.atan(Math.tan(((fullW1 / 2) * Math.PI) / 180) * (vh / vw))) *
-        180) /
+    // Horizontal from aspect: tan(h/2) = aspect * tan(v/2)
+    let baseH =
+      ((2 * Math.atan(Math.tan((baseV * Math.PI) / 360) * screenAspect)) * 180) /
       Math.PI;
+    baseH = Math.max(30, Math.min(90, baseH));
 
-    const scale = Math.max(sw / vw, sh / vh);
-    const visibleWFrac = Math.min(1, sw / (vw * scale));
-    const visibleHFrac = Math.min(1, sh / (vh * scale));
-
-    // Sanity clamp only at 1× (portrait cover), then zoom narrows freely
-    const baseH = Math.max(35, Math.min(100, fullW1 * visibleWFrac));
-    const baseV = Math.max(40, Math.min(120, fullH1 * visibleHFrac));
     const h = Math.max(4, baseH / z);
     const v = Math.max(5, baseV / z);
-
-    return { h, v, fullW: h, fullH: v, baseH, baseV, videoAspect, screenAspect, z };
+    return { h, v, fullW: h, fullH: v, baseH, baseV, screenAspect, z, scale };
   }
 
   /**
@@ -2455,36 +2452,53 @@
   }
 
   /**
-   * Project sky az/alt → screen pixels.
-   * Optical center = screen center (must match crosshair).
-   * Uses cos(alt) for horizontal scale; true spherical angDist for pick/lock.
+   * Project sky az/alt → screen pixels (pinhole / tan model ≈ phone camera).
+   * Optical center = crosshair (+ optional centerOffset).
+   * angDist is true spherical separation for pick/lock.
    */
   function project(obj) {
     if (state.heading == null || state.pitch == null) return null;
-    const dAz = deltaAngle(state.heading, obj.az);
-    const dAlt = obj.alt - state.pitch;
+    const dAzDeg = deltaAngle(state.heading, obj.az);
+    const dAltDeg = obj.alt - state.pitch;
     const { w, h } = cssSize();
     const fov = viewFov();
 
-    const ppdX = w / fov.h;
-    const ppdY = h / fov.v;
-    // Horizontal compression near zenith
-    const midAlt = ((obj.alt + state.pitch) * 0.5 * Math.PI) / 180;
-    const cosAlt = Math.max(0.12, Math.cos(midAlt));
+    // Pinhole: screen offset ∝ tan(angle); matches camera better than linear °→px
+    const hFov2 = ((fov.h / 2) * Math.PI) / 180;
+    const vFov2 = ((fov.v / 2) * Math.PI) / 180;
+    // Azimuth span shrinks by cos(elevation of aim)
+    const cosPitch = Math.max(0.15, Math.cos((state.pitch * Math.PI) / 180));
+    const dAzRad = ((dAzDeg * cosPitch) * Math.PI) / 180;
+    const dAltRad = (dAltDeg * Math.PI) / 180;
 
-    const x = w / 2 + dAz * cosAlt * ppdX;
-    const y = h / 2 - dAlt * ppdY;
+    const cx = w / 2 + (state.centerOffsetX || 0);
+    const cy = h / 2 + (state.centerOffsetY || 0);
+    const x = cx + (w / 2) * (Math.tan(dAzRad) / Math.tan(hFov2));
+    const y = cy - (h / 2) * (Math.tan(dAltRad) / Math.tan(vFov2));
+
     const angDist = angularDistance(
       state.heading,
       state.pitch,
       obj.az,
       obj.alt
     );
-    const margin = 1.05;
+    const margin = 1.08;
     const inFov =
-      Math.abs(dAz * cosAlt) < (fov.h / 2) * margin &&
-      Math.abs(dAlt) < (fov.v / 2) * margin;
-    return { x, y, dAz, dAlt, angDist, inFov, fov, ppdX, ppdY, cosAlt };
+      Math.abs(dAzDeg * cosPitch) < (fov.h / 2) * margin &&
+      Math.abs(dAltDeg) < (fov.v / 2) * margin;
+    const ppdX = w / fov.h;
+    const ppdY = h / fov.v;
+    return {
+      x,
+      y,
+      dAz: dAzDeg,
+      dAlt: dAltDeg,
+      angDist,
+      inFov,
+      fov,
+      ppdX,
+      ppdY,
+    };
   }
 
   /** Resolve Find target across grahas, ISS, stars, constellations */
@@ -2861,6 +2875,7 @@
       updateInfoCard(null);
     }
     updateGuide();
+    updateMatchChip();
     if (state.findOpen) updateObjectList();
     else updateLayerChrome();
     updateDebug();
@@ -3710,73 +3725,157 @@
       iss;
   }
 
+  function pickAlignBody() {
+    let body = resolveTarget(state.targetId);
+    if (body && body.alt >= -2 && (body.kind === "graha" || body.kind === "star")) {
+      return body;
+    }
+    // Prefer Moon, then bright grahas above horizon
+    const prefer = ["Candra", "Śukra", "Guru", "Sūrya", "Maṅgala", "Budha", "Śani"];
+    for (const name of prefer) {
+      const g = state.objects.find(
+        (o) => o.kind === "graha" && o.label === name && o.alt > 2
+      );
+      if (g) return g;
+    }
+    return state.objects.find((o) => o.kind === "graha" && o.alt > 10) || null;
+  }
+
   /**
-   * Align AR to the real sky: user puts the real Moon (etc.) under the crosshair,
-   * we set offsets so model az/alt match current device aim.
+   * Align AR to the real sky: put the real Moon (etc.) under the +, then Align.
+   * Sets heading/pitch offsets so model body sits on the crosshair.
+   * Also nudges fovScale if the body was projected off-center before align
+   * (scale error vs pure shift).
    */
   function calibrateToAim() {
-    let body = resolveTarget(state.targetId);
-    if (!body || body.alt < -2) {
-      body = state.objects.find(
-        (o) =>
-          o.kind === "graha" &&
-          o.alt > 5 &&
-          (o.label === "Candra" ||
-            o.label === "Śukra" ||
-            o.label === "Guru" ||
-            o.label === "Sūrya")
-      );
-    }
+    const body = pickAlignBody();
     if (!body || state.headingRaw == null || state.pitchRaw == null) {
-      setStatus("Pick the Moon or Venus, center it, then Align", "warn");
-      if (els.alignBanner) {
-        els.alignBanner.classList.remove("hidden");
-      }
+      setStatus("Center the real Moon in the +, then Align", "warn");
+      els.alignBanner?.classList.remove("hidden");
+      return;
+    }
+    if (state.heading == null || state.pitch == null) {
+      setStatus("Wait for sensors, then Align", "warn");
       return;
     }
 
-    // Zero compass bias so Align is not immediately undone by northBias
+    // Where the model currently paints the body (before offset change)
+    const before = project(body);
+
+    // Crosshair = current display aim. Map device raw → body sky position.
     state.northBias = 0;
-    // Device raw (+ bias0) + offset = body sky position
     state.headingOffset = deltaAngle(state.headingRaw, body.az);
     state.pitchOffset = body.alt - state.pitchRaw;
+
+    // Snap display to body immediately (no lag / deadband hold on old aim)
     state.heading = body.az;
     state.pitch = body.alt;
     state.smoothHeading = body.az;
     state.smoothPitch = body.alt;
+    state.steady = false;
+    state._steadyFrames = 0;
     state.manualLock = false;
     document.body.classList.remove("manual-look");
 
-    // Persist for session
+    // If body was far from center but at similar elevation, FOV scale may be wrong
+    if (before && before.angDist > 3 && before.angDist < 28) {
+      const { w, h } = cssSize();
+      const cx = w / 2;
+      const cy = h / 2;
+      const rPx = Math.hypot(before.x - cx, before.y - cy);
+      const rExp =
+        (Math.min(w, h) / 2) *
+        (before.angDist / (Math.min(before.fov.h, before.fov.v) / 2));
+      if (rExp > 20 && rPx > 20) {
+        const ratio = rPx / rExp;
+        // Only gentle auto FOV tweak (don't overfit noise)
+        if (ratio > 0.7 && ratio < 1.4) {
+          state.fovScale = Math.max(
+            0.8,
+            Math.min(1.25, (state.fovScale || 1) * (0.65 + 0.35 * ratio))
+          );
+        }
+      }
+    }
+
+    persistAlign();
+    syncAlignSliders();
+    state.targetId = body.id;
+    setStatus("Matched · " + body.label + " on +", "ok");
+    els.alignBanner?.classList.add("hidden");
+    els.matchBtn?.classList.add("hidden");
+    updateGuide();
+    syncGuidingUi();
+  }
+
+  /** Shift overlay by small degrees (fine match without full recalibrate). */
+  function nudgeAlign(dAz, dAlt) {
+    state.headingOffset = (state.headingOffset || 0) + dAz;
+    state.pitchOffset = (state.pitchOffset || 0) + dAlt;
+    if (state.heading != null) {
+      state.heading = norm360(state.heading + dAz);
+      state.smoothHeading = state.heading;
+    }
+    if (state.pitch != null) {
+      state.pitch = Math.max(-89, Math.min(89, state.pitch + dAlt));
+      state.smoothPitch = state.pitch;
+    }
+    state.northBias = 0;
+    state.steady = false;
+    persistAlign();
+    syncAlignSliders();
+    setStatus(
+      "Nudge " +
+        (dAz ? (dAz > 0 ? "→" : "←") : "") +
+        (dAlt ? (dAlt > 0 ? "↑" : "↓") : ""),
+      "ok"
+    );
+  }
+
+  function persistAlign() {
     try {
       localStorage.setItem(
         "skyAlign",
         JSON.stringify({
           headingOffset: state.headingOffset,
           pitchOffset: state.pitchOffset,
+          fovScale: state.fovScale || 1,
           at: Date.now(),
         })
       );
     } catch (_) {}
+  }
 
+  function syncAlignSliders() {
     if (els.headingOffset) {
-      const hv = Math.max(-60, Math.min(60, Math.round(state.headingOffset)));
-      els.headingOffset.min = "-60";
-      els.headingOffset.max = "60";
+      els.headingOffset.min = "-180";
+      els.headingOffset.max = "180";
+      const hv = Math.max(-180, Math.min(180, Math.round(state.headingOffset || 0)));
       els.headingOffset.value = String(hv);
-      els.headingOffsetVal.textContent =
-        (state.headingOffset >= 0 ? "+" : "") + state.headingOffset.toFixed(0) + "°";
+      if (els.headingOffsetVal) {
+        els.headingOffsetVal.textContent =
+          ((state.headingOffset || 0) >= 0 ? "+" : "") +
+          (state.headingOffset || 0).toFixed(1) +
+          "°";
+      }
     }
     if (els.pitchOffset) {
-      const pv = Math.max(-40, Math.min(40, Math.round(state.pitchOffset)));
-      els.pitchOffset.min = "-40";
-      els.pitchOffset.max = "40";
+      els.pitchOffset.min = "-60";
+      els.pitchOffset.max = "60";
+      const pv = Math.max(-60, Math.min(60, Math.round(state.pitchOffset || 0)));
       els.pitchOffset.value = String(pv);
-      els.pitchOffsetVal.textContent =
-        (state.pitchOffset >= 0 ? "+" : "") + state.pitchOffset.toFixed(0) + "°";
+      if (els.pitchOffsetVal) {
+        els.pitchOffsetVal.textContent =
+          ((state.pitchOffset || 0) >= 0 ? "+" : "") +
+          (state.pitchOffset || 0).toFixed(1) +
+          "°";
+      }
     }
-    setStatus("Aligned on " + body.label, "ok");
-    els.alignBanner?.classList.add("hidden");
+    if (els.fovScale) {
+      const fs = Math.round((state.fovScale || 1) * 100);
+      els.fovScale.value = String(fs);
+      if (els.fovScaleVal) els.fovScaleVal.textContent = (state.fovScale || 1).toFixed(2) + "×";
+    }
   }
 
   function loadSavedAlign() {
@@ -3788,7 +3887,41 @@
       if (data.at && Date.now() - data.at > 12 * 3600 * 1000) return;
       if (typeof data.headingOffset === "number") state.headingOffset = data.headingOffset;
       if (typeof data.pitchOffset === "number") state.pitchOffset = data.pitchOffset;
+      if (typeof data.fovScale === "number" && data.fovScale > 0.5 && data.fovScale < 1.5) {
+        state.fovScale = data.fovScale;
+      }
+      syncAlignSliders();
     } catch (_) {}
+  }
+
+  /** Show Match chip when live camera + Moon (etc.) is near the view */
+  function updateMatchChip() {
+    const camOn = state.running && state.overlays.camera;
+    if (els.nudgePad) {
+      els.nudgePad.classList.toggle("hidden", !camOn);
+    }
+    if (!els.matchBtn) return;
+    if (!camOn) {
+      els.matchBtn.classList.add("hidden");
+      return;
+    }
+    const body = pickAlignBody();
+    if (!body || state.heading == null) {
+      els.matchBtn.classList.add("hidden");
+      return;
+    }
+    const p = project(body);
+    // Offer match when body is on/near screen (user can see both real + overlay)
+    if (p && p.angDist < 40 && body.alt > -1) {
+      els.matchBtn.classList.remove("hidden");
+      const gap = p.angDist.toFixed(0);
+      els.matchBtn.textContent =
+        p.angDist < 1.2
+          ? "✓ " + body.label + " matched"
+          : "Match " + body.label + " · " + gap + "° off";
+    } else {
+      els.matchBtn.classList.add("hidden");
+    }
   }
 
   // ── Loop ─────────────────────────────────────────────────────────────
@@ -4118,6 +4251,32 @@
       );
     });
     els.zoomChip?.addEventListener("click", () => applyZoom(1, { snap: true }));
+    els.matchBtn?.addEventListener("click", () => {
+      // Prefer Moon as target when matching
+      const moon = state.objects.find(
+        (o) => o.kind === "graha" && o.label === "Candra" && o.alt > -2
+      );
+      if (moon) state.targetId = moon.id;
+      calibrateToAim();
+    });
+    els.nudgePad?.querySelectorAll("[data-nudge]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const raw = btn.getAttribute("data-nudge") || "0,0";
+        if (btn.classList.contains("nudge-align") || raw === "0,0") {
+          calibrateToAim();
+          return;
+        }
+        const parts = raw.split(",").map(Number);
+        nudgeAlign(parts[0] || 0, parts[1] || 0);
+      });
+    });
+    els.fovScale?.addEventListener("input", () => {
+      const v = Number(els.fovScale.value) || 100;
+      state.fovScale = Math.max(0.8, Math.min(1.25, v / 100));
+      if (els.fovScaleVal) els.fovScaleVal.textContent = state.fovScale.toFixed(2) + "×";
+      persistAlign();
+    });
 
     setStatus("Tap Allow & start", "muted");
   }
